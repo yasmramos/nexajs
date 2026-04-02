@@ -74,8 +74,8 @@ See `index.html` for complete usage examples.
 
 ## 📄 License
 
-MIT License - see LICENSE file for details.
+Apache 2.0 License - see LICENSE file for details.
 
 ---
 
-Made with ❤️ by Yasmany Ramos García
+Created by Yasmany Ramos García
