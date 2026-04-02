@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexaJS - Demo</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+
+    h1 {
+      color: #667eea;
+      margin-bottom: 0.5rem;
+      font-size: 2.5rem;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 2rem;
+      font-size: 1.1rem;
+    }
+
+    .demo-section {
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      background: #fafafa;
+    }
+
+    .demo-section h2 {
+      color: #764ba2;
+      margin-bottom: 1rem;
+      font-size: 1.3rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      background: #667eea;
+      color: white;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      vertical-align: middle;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: transform 0.2s, box-shadow 0.2s;
+      margin-right: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      padding: 0.6rem;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 1rem;
+      width: 200px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .counter-display {
+      font-size: 3rem;
+      font-weight: bold;
+      color: #667eea;
+      text-align: center;
+      margin: 1rem 0;
+    }
+
+    .todo-item {
+      display: flex;
+      align-items: center;
+      padding: 0.8rem;
+      background: white;
+      border-radius: 6px;
+      margin-bottom: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .todo-item.completed span {
+      text-decoration: line-through;
+      color: #999;
+    }
+
+    .todo-item input[type="checkbox"] {
+      margin-right: 1rem;
+      width: 18px;
+      height: 18px;
+    }
+
+    .todo-item span {
+      flex: 1;
+    }
+
+    .todo-item button {
+      background: #ff6b6b;
+      padding: 0.4rem 0.8rem;
+      font-size: 0.9rem;
+    }
+
+    .user-card {
+      background: white;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      max-width: 400px;
+    }
+
+    .user-card img {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      margin-bottom: 1rem;
+      border: 3px solid #667eea;
+    }
+
+    .user-card h3 {
+      color: #333;
+      margin-bottom: 0.5rem;
+    }
+
+    .user-card p {
+      color: #666;
+      margin-bottom: 0.3rem;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+    }
+
+    .alert-success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .alert-info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    .color-box {
+      width: 100px;
+      height: 100px;
+      border-radius: 8px;
+      transition: all 0.3s;
+    }
+
+    code {
+      background: #f4f4f4;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .feature {
+      background: white;
+      padding: 1rem;
+      border-radius: 6px;
+      border-left: 4px solid #667eea;
+    }
+
+    .feature strong {
+      color: #667eea;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 NexaJS</h1>
+    <p class="subtitle">Framework reactivo sin build • Ultra liviano • HTML-first</p>
+
+    <!-- Demo 1: Contador Simple -->
+    <div class="demo-section">
+      <h2><span class="badge">x-text</span> <span class="badge">x-click</span> Contador Reactivo</h2>
+      <div x-data="{ count: 0 }">
+        <div class="counter-display">
+          <span x-text="count">0</span>
+        </div>
+        <button x-click="count++">➕ Incrementar</button>
+        <button x-click="count--">➖ Decrementar</button>
+        <button x-click="count = 0">🔄 Reset</button>
+      </div>
+    </div>
+
+    <!-- Demo 2: Two-way Binding -->
+    <div class="demo-section">
+      <h2><span class="badge">x-model</span> Two-Way Binding</h2>
+      <div x-data="{ name: '', email: '' }">
+        <div style="margin-bottom: 1rem;">
+          <label style="display: block; margin-bottom: 0.5rem;"><strong>Nombre:</strong></label>
+          <input type="text" x-model="name" placeholder="Tu nombre...">
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label style="display: block; margin-bottom: 0.5rem;"><strong>Email:</strong></label>
+          <input type="text" x-model="email" placeholder="tu@email.com">
+        </div>
+        <div class="alert alert-info">
+          <strong>Vista previa:</strong><br>
+          Hola <span x-text="name || '...'"></span>, tu email es <span x-text="email || '...'"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Demo 3: Renderizado Condicional -->
+    <div class="demo-section">
+      <h2><span class="badge">x-show</span> <span class="badge">x-if</span> Renderizado Condicional</h2>
+      <div x-data="{ showInfo: false, isLoggedIn: false }">
+        <button x-click="showInfo = !showInfo">
+          <span x-text="showInfo ? 'Ocultar' : 'Mostrar'"></span> Información
+        </button>
+        <button x-click="isLoggedIn = !isLoggedIn" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+          <span x-text="isLoggedIn ? 'Cerrar sesión' : 'Iniciar sesión'"></span>
+        </button>
+
+        <div x-show="showInfo" style="margin-top: 1rem;">
+          <div class="alert alert-info">
+            Esta información solo es visible cuando <code>showInfo</code> es true.
+            Usa <code>x-show</code> para mostrar/ocultar con CSS (display: none).
+          </div>
+        </div>
+
+        <div x-if="isLoggedIn" style="margin-top: 1rem;">
+          <div class="alert alert-success">
+            🎉 ¡Bienvenido! Has iniciado sesión correctamente.
+            Esto usa <code>x-if</code> que crea/destruye el nodo del DOM.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Demo 4: Listas -->
+    <div class="demo-section">
+      <h2><span class="badge">x-for</span> Listas Dinámicas</h2>
+      <div x-data="{ 
+        todos: [
+          { id: 1, text: 'Aprender NexaJS', completed: true },
+          { id: 2, text: 'Crear app reactiva', completed: false },
+          { id: 3, text: 'Compartir con amigos', completed: false }
+        ],
+        newTodo: ''
+      }">
+        <div style="margin-bottom: 1rem;">
+          <input type="text" x-model="newTodo" placeholder="Nueva tarea..." style="margin-right: 0.5rem;">
+          <button x-click="
+            if(newTodo.trim()) {
+              todos.push({ id: Date.now(), text: newTodo, completed: false });
+              newTodo = '';
+            }
+          ">Agregar</button>
+        </div>
+
+        <div x-for="todo in todos">
+          <div class="todo-item" x-bind:class="{ completed: todo.completed }">
+            <input type="checkbox" x-model="todo.completed">
+            <span x-text="todo.text"></span>
+            <button x-click="todos = todos.filter(t => t.id !== todo.id)">Eliminar</button>
+          </div>
+        </div>
+
+        <p style="margin-top: 1rem; color: #666;">
+          Total: <strong x-text="todos.length"></strong> | 
+          Completadas: <strong x-text="todos.filter(t => t.completed).length"></strong>
+        </p>
+      </div>
+    </div>
+
+    <!-- Demo 5: Binding de Atributos -->
+    <div class="demo-section">
+      <h2><span class="badge">x-bind</span> Binding de Atributos</h2>
+      <div x-data="{ 
+        color: '#667eea', 
+        size: 100, 
+        isActive: true,
+        imageUrl: 'https://picsum.photos/200'
+      }">
+        <div style="margin-bottom: 1rem;">
+          <label>Color: </label>
+          <input type="text" x-model="color" style="width: 150px;">
+          
+          <label style="margin-left: 1rem;">Tamaño: </label>
+          <input type="number" x-model="size" style="width: 80px;">
+          
+          <button x-click="isActive = !isActive" style="margin-left: 1rem;">
+            <span x-text="isActive ? 'Desactivar' : 'Activar'"></span>
+          </button>
+        </div>
+
+        <div x-bind:style="{ backgroundColor: color, width: size + 'px', height: size + 'px' }" class="color-box"></div>
+        
+        <img x-bind:src="imageUrl" x-bind:alt="'Imagen de ' + size + 'px'" style="margin-top: 1rem; border-radius: 8px;">
+        
+        <p style="margin-top: 0.5rem;">
+          Estado: <strong x-text="isActive ? 'Activo' : 'Inactivo'"></strong>
+        </p>
+      </div>
+    </div>
+
+    <!-- Demo 6: Componente Registrado -->
+    <div class="demo-section">
+      <h2><span class="badge">component</span> Componente Registrado</h2>
+      <div x-data="userProfile"></div>
+    </div>
+
+    <!-- Features -->
+    <div class="demo-section">
+      <h2>✨ Características de NexaJS</h2>
+      <div class="features">
+        <div class="feature">
+          <strong>⚡ Sin Build</strong>
+          <p>Carga directa desde CDN, sin webpack ni vite.</p>
+        </div>
+        <div class="feature">
+          <strong>🎯 Reactividad Proxy</strong>
+          <p>Detección automática de dependencias con ES6 Proxy.</p>
+        </div>
+        <div class="feature">
+          <strong>📦 Ultra Liviano</strong>
+          <p>Menos de 10kb gzipped, perfecto para performance.</p>
+        </div>
+        <div class="feature">
+          <strong>🔌 Extensible</strong>
+          <p>Sistema de plugins y directivas personalizadas.</p>
+        </div>
+        <div class="feature">
+          <strong>🌐 HTML-first</strong>
+          <p>Escribe lógica reactiva directamente en tu HTML.</p>
+        </div>
+        <div class="feature">
+          <strong>🚀 Sin Virtual DOM</strong>
+          <p>Actualizaciones directas al DOM, máximo rendimiento.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cargar NexaJS -->
+  <script src="nexajs.js"></script>
+  
+  <!-- Definir componente registrado -->
+  <script>
+    Nexa.component('userProfile', {
+      data() {
+        return {
+          user: {
+            name: 'Yasmín Ramos',
+            email: 'yasmramos95@gmail.com',
+            role: 'Developer',
+            avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Yasmin'
+          }
+        };
+      },
+      methods: {
+        greet() {
+          alert(`¡Hola! Soy ${this.user.name}, ${this.user.role}`);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
