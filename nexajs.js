@@ -1,7 +1,7 @@
 /**
- * NexaJS - Framework reactivo sin build
- * Versión: 0.1.0
- * Filosofía: Reactividad directa, sin virtual DOM, ultra liviano
+ * NexaJS - Buildless Reactive Framework
+ * Version: 0.1.0
+ * Philosophy: Direct reactivity, no virtual DOM, ultra lightweight
  */
 
 (function(global) {
@@ -12,7 +12,7 @@
   const effectStack = [];
 
   // ============================================
-  // 1. MOTOR REACTIVO (Core con Proxy)
+  // 1. REACTIVE ENGINE (Core with Proxy)
   // ============================================
   
   function createReactive(obj, componentId) {
@@ -40,7 +40,7 @@
       }
       listeners.get(key).add(activeEffect);
       
-      // Guardar referencia para cleanup
+      // Keep reference for cleanup
       if (!componentEffects.has(componentId)) {
         componentEffects.set(componentId, new Set());
       }
@@ -60,7 +60,7 @@
   }
 
   // ============================================
-  // 2. SISTEMA DE EFECTOS
+  // 2. EFFECT SYSTEM
   // ============================================
   
   function effect(fn) {
@@ -75,14 +75,14 @@
   }
 
   // ============================================
-  // 3. EVALUADOR SEGURO
+  // 3. SAFE EVALUATOR
   // ============================================
   
   function evaluate(expr, scope) {
     if (!expr) return '';
     
     try {
-      // Soporte para expresiones simples y llamadas a métodos
+      // Support for simple expressions and method calls
       const func = new Function('scope', `
         with(scope) {
           try {
@@ -100,7 +100,7 @@
   }
 
   // ============================================
-  // 4. REGISTRO DE DIRECTIVAS
+  // 4. DIRECTIVE REGISTRATION
   // ============================================
   
   const directives = {};
@@ -110,10 +110,10 @@
   }
 
   // ============================================
-  // 5. DIRECTIVAS BASE
+  // 5. BASE DIRECTIVES
   // ============================================
   
-  // x-text: Actualiza texto
+  // x-text: Updates text content
   registerDirective('text', (el, expr, ctx) => {
     effect(() => {
       const value = evaluate(expr, ctx.data);
@@ -121,7 +121,7 @@
     });
   });
 
-  // x-html: Actualiza HTML interno
+  // x-html: Updates inner HTML
   registerDirective('html', (el, expr, ctx) => {
     effect(() => {
       const value = evaluate(expr, ctx.data);
@@ -129,7 +129,7 @@
     });
   });
 
-  // x-show: Muestra/oculta elemento
+  // x-show: Shows/hides element
   registerDirective('show', (el, expr, ctx) => {
     effect(() => {
       const show = !!evaluate(expr, ctx.data);
@@ -137,7 +137,7 @@
     });
   });
 
-  // x-if: Renderizado condicional (crea/destruye nodo)
+  // x-if: Conditional rendering (creates/destroys node)
   registerDirective('if', (el, expr, ctx) => {
     const placeholder = document.createComment('x-if');
     let mounted = false;
@@ -164,7 +164,7 @@
     el.style.display = 'none';
   });
 
-  // x-for: Listas
+  // x-for: Lists
   registerDirective('for', (el, expr, ctx) => {
     const match = expr.match(/(\w+)\s+in\s+(.+)/);
     if (!match) return;
@@ -177,7 +177,7 @@
       const list = evaluate(listExpr, ctx.data);
       if (!Array.isArray(list)) return;
 
-      // Limpiar items anteriores
+      // Clear previous items
       previousItems.forEach(item => {
         if (item.el && item.el.parentNode) {
           item.el.parentNode.removeChild(item.el);
@@ -185,7 +185,7 @@
       });
       previousItems = [];
 
-      // Crear nuevos items
+      // Create new items
       list.forEach((item, index) => {
         const clone = el.cloneNode(true);
         clone.removeAttribute('x-for');
@@ -208,7 +208,7 @@
 
   // x-model: Two-way binding
   registerDirective('model', (el, expr, ctx) => {
-    // Actualizar vista cuando cambia dato
+    // Update view when data changes
     effect(() => {
       const value = evaluate(expr, ctx.data);
       if (el.type === 'checkbox') {
@@ -220,7 +220,7 @@
       }
     });
 
-    // Actualizar dato cuando cambia input
+    // Update data when input changes
     const eventType = el.type === 'checkbox' || el.type === 'radio' ? 'change' : 'input';
     el.addEventListener(eventType, () => {
       const path = expr.split('.');
@@ -241,14 +241,14 @@
     });
   });
 
-  // x-click: Manejo de eventos click
+  // x-click: Click event handling
   registerDirective('click', (el, expr, ctx) => {
     el.addEventListener('click', (event) => {
       const func = evaluate(expr, ctx.data);
       if (typeof func === 'function') {
         func.call(ctx.data, event);
       } else {
-        // Evaluar expresión como statement
+        // Evaluate expression as statement
         try {
           new Function('scope', 'with(scope){ ' + expr + ' }')(ctx.data);
         } catch (e) {
@@ -258,7 +258,7 @@
     });
   });
 
-  // x-on: Manejo genérico de eventos
+  // x-on: Generic event handling
   registerDirective('on', (el, expr, ctx) => {
     const [eventName, ...handlerParts] = expr.split(':');
     const handlerExpr = handlerParts.join(':');
@@ -277,7 +277,7 @@
     });
   });
 
-  // x-bind: Binding dinámico de atributos
+  // x-bind: Dynamic attribute binding
   registerDirective('bind', (el, expr, ctx) => {
     effect(() => {
       const value = evaluate(expr, ctx.data);
@@ -307,7 +307,7 @@
   });
 
   // ============================================
-  // 6. SISTEMA DE COMPONENTES
+  // 6. COMPONENT SYSTEM
   // ============================================
   
   const components = {};
@@ -328,7 +328,7 @@
       methods: methods
     };
 
-    // Mezclar métodos en el contexto de datos para acceso directo
+    // Mix methods into data context for direct access
     Object.keys(methods).forEach(key => {
       if (!(key in ctx.data)) {
         ctx.data[key] = methods[key].bind(ctx.data);
@@ -339,7 +339,7 @@
   }
 
   // ============================================
-  // 7. COMPILADOR DOM
+  // 7. DOM COMPILER
   // ============================================
   
   function compileElement(el, ctx) {
@@ -358,12 +358,12 @@
         if (handler) {
           handler(el, value, ctx);
         } else {
-          console.warn(`NexaJS: Directiva '${directiveName}' no registrada`);
+          console.warn(`NexaJS: Directive '${directiveName}' not registered`);
         }
       }
     });
 
-    // Recorrer hijos
+    // Traverse children
     if (el.children) {
       Array.from(el.children).forEach(child => {
         compileElement(child, ctx);
@@ -378,11 +378,11 @@
       const dataAttr = el.getAttribute('x-data');
       let ctx;
 
-      // Verificar si es un componente registrado
+      // Check if it's a registered component
       if (components[dataAttr]) {
         ctx = createComponentContext(components[dataAttr]);
       } else {
-        // Crear contexto inline
+        // Create inline context
         try {
           const dataObj = new Function('return ' + dataAttr)();
           ctx = createComponentContext({ data: dataObj });
@@ -392,13 +392,13 @@
         }
       }
 
-      // Compilar elemento y sus hijos
+      // Compile element and its children
       compileElement(el, ctx);
     });
   }
 
   // ============================================
-  // 8. API PÚBLICA
+  // 8. PUBLIC API
   // ============================================
   
   Nexa = {
@@ -436,10 +436,10 @@
     }
   };
 
-  // Exportar globalmente
+  // Export globally
   global.Nexa = Nexa;
 
-  // Auto-inicializar si hay elementos x-data al cargar
+  // Auto-initialize if there are x-data elements on load
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       Nexa.start();

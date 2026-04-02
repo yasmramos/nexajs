@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -224,17 +224,17 @@
 <body>
   <div class="container">
     <h1>🚀 NexaJS</h1>
-    <p class="subtitle">Framework reactivo sin build • Ultra liviano • HTML-first</p>
+    <p class="subtitle">Buildless Reactive Framework • Ultra Lightweight • HTML-first</p>
 
-    <!-- Demo 1: Contador Simple -->
+    <!-- Demo 1: Simple Counter -->
     <div class="demo-section">
-      <h2><span class="badge">x-text</span> <span class="badge">x-click</span> Contador Reactivo</h2>
+      <h2><span class="badge">x-text</span> <span class="badge">x-click</span> Reactive Counter</h2>
       <div x-data="{ count: 0 }">
         <div class="counter-display">
           <span x-text="count">0</span>
         </div>
-        <button x-click="count++">➕ Incrementar</button>
-        <button x-click="count--">➖ Decrementar</button>
+        <button x-click="count++">➕ Increment</button>
+        <button x-click="count--">➖ Decrement</button>
         <button x-click="count = 0">🔄 Reset</button>
       </div>
     </div>
@@ -244,86 +244,86 @@
       <h2><span class="badge">x-model</span> Two-Way Binding</h2>
       <div x-data="{ name: '', email: '' }">
         <div style="margin-bottom: 1rem;">
-          <label style="display: block; margin-bottom: 0.5rem;"><strong>Nombre:</strong></label>
-          <input type="text" x-model="name" placeholder="Tu nombre...">
+          <label style="display: block; margin-bottom: 0.5rem;"><strong>Name:</strong></label>
+          <input type="text" x-model="name" placeholder="Your name...">
         </div>
         <div style="margin-bottom: 1rem;">
           <label style="display: block; margin-bottom: 0.5rem;"><strong>Email:</strong></label>
-          <input type="text" x-model="email" placeholder="tu@email.com">
+          <input type="text" x-model="email" placeholder="your@email.com">
         </div>
         <div class="alert alert-info">
-          <strong>Vista previa:</strong><br>
-          Hola <span x-text="name || '...'"></span>, tu email es <span x-text="email || '...'"></span>
+          <strong>Preview:</strong><br>
+          Hello <span x-text="name || '...'"></span>, your email is <span x-text="email || '...'"></span>
         </div>
       </div>
     </div>
 
-    <!-- Demo 3: Renderizado Condicional -->
+    <!-- Demo 3: Conditional Rendering -->
     <div class="demo-section">
-      <h2><span class="badge">x-show</span> <span class="badge">x-if</span> Renderizado Condicional</h2>
+      <h2><span class="badge">x-show</span> <span class="badge">x-if</span> Conditional Rendering</h2>
       <div x-data="{ showInfo: false, isLoggedIn: false }">
         <button x-click="showInfo = !showInfo">
-          <span x-text="showInfo ? 'Ocultar' : 'Mostrar'"></span> Información
+          <span x-text="showInfo ? 'Hide' : 'Show'"></span> Info
         </button>
         <button x-click="isLoggedIn = !isLoggedIn" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-          <span x-text="isLoggedIn ? 'Cerrar sesión' : 'Iniciar sesión'"></span>
+          <span x-text="isLoggedIn ? 'Logout' : 'Login'"></span>
         </button>
 
         <div x-show="showInfo" style="margin-top: 1rem;">
           <div class="alert alert-info">
-            Esta información solo es visible cuando <code>showInfo</code> es true.
-            Usa <code>x-show</code> para mostrar/ocultar con CSS (display: none).
+            This information is only visible when <code>showInfo</code> is true.
+            Use <code>x-show</code> to show/hide with CSS (display: none).
           </div>
         </div>
 
         <div x-if="isLoggedIn" style="margin-top: 1rem;">
           <div class="alert alert-success">
-            🎉 ¡Bienvenido! Has iniciado sesión correctamente.
-            Esto usa <code>x-if</code> que crea/destruye el nodo del DOM.
+            🎉 Welcome! You have logged in successfully.
+            This uses <code>x-if</code> which creates/destroys the DOM node.
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Demo 4: Listas -->
+    <!-- Demo 4: Lists -->
     <div class="demo-section">
-      <h2><span class="badge">x-for</span> Listas Dinámicas</h2>
+      <h2><span class="badge">x-for</span> Dynamic Lists</h2>
       <div x-data="{ 
         todos: [
-          { id: 1, text: 'Aprender NexaJS', completed: true },
-          { id: 2, text: 'Crear app reactiva', completed: false },
-          { id: 3, text: 'Compartir con amigos', completed: false }
+          { id: 1, text: 'Learn NexaJS', completed: true },
+          { id: 2, text: 'Build reactive app', completed: false },
+          { id: 3, text: 'Share with friends', completed: false }
         ],
         newTodo: ''
       }">
         <div style="margin-bottom: 1rem;">
-          <input type="text" x-model="newTodo" placeholder="Nueva tarea..." style="margin-right: 0.5rem;">
+          <input type="text" x-model="newTodo" placeholder="New task..." style="margin-right: 0.5rem;">
           <button x-click="
             if(newTodo.trim()) {
               todos.push({ id: Date.now(), text: newTodo, completed: false });
               newTodo = '';
             }
-          ">Agregar</button>
+          ">Add</button>
         </div>
 
         <div x-for="todo in todos">
           <div class="todo-item" x-bind:class="{ completed: todo.completed }">
             <input type="checkbox" x-model="todo.completed">
             <span x-text="todo.text"></span>
-            <button x-click="todos = todos.filter(t => t.id !== todo.id)">Eliminar</button>
+            <button x-click="todos = todos.filter(t => t.id !== todo.id)">Delete</button>
           </div>
         </div>
 
         <p style="margin-top: 1rem; color: #666;">
           Total: <strong x-text="todos.length"></strong> | 
-          Completadas: <strong x-text="todos.filter(t => t.completed).length"></strong>
+          Completed: <strong x-text="todos.filter(t => t.completed).length"></strong>
         </p>
       </div>
     </div>
 
-    <!-- Demo 5: Binding de Atributos -->
+    <!-- Demo 5: Attribute Binding -->
     <div class="demo-section">
-      <h2><span class="badge">x-bind</span> Binding de Atributos</h2>
+      <h2><span class="badge">x-bind</span> Attribute Binding</h2>
       <div x-data="{ 
         color: '#667eea', 
         size: 100, 
@@ -334,66 +334,66 @@
           <label>Color: </label>
           <input type="text" x-model="color" style="width: 150px;">
           
-          <label style="margin-left: 1rem;">Tamaño: </label>
+          <label style="margin-left: 1rem;">Size: </label>
           <input type="number" x-model="size" style="width: 80px;">
           
           <button x-click="isActive = !isActive" style="margin-left: 1rem;">
-            <span x-text="isActive ? 'Desactivar' : 'Activar'"></span>
+            <span x-text="isActive ? 'Deactivate' : 'Activate'"></span>
           </button>
         </div>
 
         <div x-bind:style="{ backgroundColor: color, width: size + 'px', height: size + 'px' }" class="color-box"></div>
         
-        <img x-bind:src="imageUrl" x-bind:alt="'Imagen de ' + size + 'px'" style="margin-top: 1rem; border-radius: 8px;">
+        <img x-bind:src="imageUrl" x-bind:alt="'Image of ' + size + 'px'" style="margin-top: 1rem; border-radius: 8px;">
         
         <p style="margin-top: 0.5rem;">
-          Estado: <strong x-text="isActive ? 'Activo' : 'Inactivo'"></strong>
+          Status: <strong x-text="isActive ? 'Active' : 'Inactive'"></strong>
         </p>
       </div>
     </div>
 
-    <!-- Demo 6: Componente Registrado -->
+    <!-- Demo 6: Registered Component -->
     <div class="demo-section">
-      <h2><span class="badge">component</span> Componente Registrado</h2>
+      <h2><span class="badge">component</span> Registered Component</h2>
       <div x-data="userProfile"></div>
     </div>
 
     <!-- Features -->
     <div class="demo-section">
-      <h2>✨ Características de NexaJS</h2>
+      <h2>✨ NexaJS Features</h2>
       <div class="features">
         <div class="feature">
-          <strong>⚡ Sin Build</strong>
-          <p>Carga directa desde CDN, sin webpack ni vite.</p>
+          <strong>⚡ No Build</strong>
+          <p>Direct CDN loading, no webpack or vite needed.</p>
         </div>
         <div class="feature">
-          <strong>🎯 Reactividad Proxy</strong>
-          <p>Detección automática de dependencias con ES6 Proxy.</p>
+          <strong>🎯 Proxy Reactivity</strong>
+          <p>Automatic dependency detection with ES6 Proxy.</p>
         </div>
         <div class="feature">
-          <strong>📦 Ultra Liviano</strong>
-          <p>Menos de 10kb gzipped, perfecto para performance.</p>
+          <strong>📦 Ultra Lightweight</strong>
+          <p>Less than 10kb gzipped, perfect for performance.</p>
         </div>
         <div class="feature">
           <strong>🔌 Extensible</strong>
-          <p>Sistema de plugins y directivas personalizadas.</p>
+          <p>Plugin system and custom directives.</p>
         </div>
         <div class="feature">
           <strong>🌐 HTML-first</strong>
-          <p>Escribe lógica reactiva directamente en tu HTML.</p>
+          <p>Write reactive logic directly in your HTML.</p>
         </div>
         <div class="feature">
-          <strong>🚀 Sin Virtual DOM</strong>
-          <p>Actualizaciones directas al DOM, máximo rendimiento.</p>
+          <strong>🚀 No Virtual DOM</strong>
+          <p>Direct DOM updates, maximum performance.</p>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Cargar NexaJS -->
+  <!-- Load NexaJS -->
   <script src="nexajs.js"></script>
   
-  <!-- Definir componente registrado -->
+  <!-- Define registered component -->
   <script>
     Nexa.component('userProfile', {
       data() {
@@ -408,7 +408,7 @@
       },
       methods: {
         greet() {
-          alert(`¡Hola! Soy ${this.user.name}, ${this.user.role}`);
+          alert(`Hello! I'm ${this.user.name}, ${this.user.role}`);
         }
       }
     });
