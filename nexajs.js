@@ -1,5 +1,5 @@
 /**
- * NexaJS v0.3.0 - A lightweight reactive framework without build steps
+ * NexaJS v0.2.0 - A lightweight reactive framework without build steps
  * Author: Yasmany Ramos García
  * License: Apache 2.0
  */
