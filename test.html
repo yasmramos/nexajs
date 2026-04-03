@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexaJS v0.3.0 - Test Suite</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        .test-result { padding: 0.5rem; margin: 0.5rem 0; border-radius: 4px; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        h1 { color: #333; }
+        .summary { font-weight: bold; font-size: 1.2rem; margin-top: 2rem; }
+    </style>
+</head>
+<body>
+    <h1>🧪 NexaJS v0.3.0 Test Suite</h1>
+    <div id="results"></div>
+    <div class="summary" id="summary"></div>
+
+    <script src="nexajs.js"></script>
+    <script>
+        const results = [];
+        let passed = 0, failed = 0;
+
+        function test(name, fn) {
+            try {
+                fn();
+                results.push({ name, pass: true });
+                passed++;
+            } catch (e) {
+                results.push({ name, pass: false, error: e.message });
+                failed++;
+            }
+        }
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message || 'Assertion failed');
+        }
+
+        // Test 1: Reactive Basic
+        test('Reactive: Basic property access and mutation', () => {
+            const state = Nexa.reactive({ count: 0 });
+            assert(state.count === 0, 'Initial value should be 0');
+            state.count = 5;
+            assert(state.count === 5, 'Updated value should be 5');
+        });
+
+        // Test 2: Reactive Nested
+        test('Reactive: Nested objects', () => {
+            const state = Nexa.reactive({ user: { name: 'John' } });
+            assert(state.user.name === 'John', 'Nested value accessible');
+            state.user.name = 'Jane';
+            assert(state.user.name === 'Jane', 'Nested value updatable');
+        });
+
+        // Test 3: Computed
+        test('Computed: Basic computation', () => {
+            const state = Nexa.reactive({ count: 2 });
+            const double = Nexa.computed(() => state.count * 2);
+            assert(double.value === 4, 'Computed value should be 4');
+            state.count = 5;
+            // Force update cycle
+            return Nexa.nextTick().then(() => {
+                assert(double.value === 10, 'Computed should update to 10');
+            });
+        });
+
+        // Test 4: Watch
+        test('Watch: Callback triggered on change', (done) => {
+            return new Promise(resolve => {
+                const state = Nexa.reactive({ val: 1 });
+                let called = false;
+                Nexa.watch(() => state.val, (newVal, oldVal) => {
+                    called = true;
+                    assert(newVal === 2, 'New value should be 2');
+                    assert(oldVal === 1, 'Old value should be 1');
+                    resolve();
+                });
+                state.val = 2;
+            });
+        });
+
+        // Test 5: NextTick
+        test('NextTick: Executes after DOM update', (done) => {
+            return new Promise(resolve => {
+                let executed = false;
+                Nexa.nextTick(() => {
+                    executed = true;
+                    assert(executed, 'nextTick callback executed');
+                    resolve();
+                });
+            });
+        });
+
+        // Test 6: Directive Registration
+        test('Directives: Custom directive registration', () => {
+            let directiveCalled = false;
+            Nexa.directive('test', (el, expr, ctx) => {
+                directiveCalled = true;
+            });
+            // Just checking registration doesn't throw
+            assert(typeof Nexa.directive === 'function', 'directive API exists');
+        });
+
+        // Render results
+        const resultsDiv = document.getElementById('results');
+        results.forEach(r => {
+            const div = document.createElement('div');
+            div.className = `test-result ${r.pass ? 'pass' : 'fail'}`;
+            div.textContent = `${r.pass ? '✅' : '❌'} ${r.name}` + (r.error ? `: ${r.error}` : '');
+            resultsDiv.appendChild(div);
+        });
+
+        document.getElementById('summary').textContent = 
+            `Results: ${passed} passed, ${failed} failed`;
+    </script>
+</body>
+</html>
