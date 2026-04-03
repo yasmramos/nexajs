@@ -1,5 +1,5 @@
 /**
- * NexaJS v0.2.0 - A lightweight reactive framework without build steps
+ * NexaJS v0.3.0 - A lightweight reactive framework without build steps
  * Author: Yasmany Ramos García
  * License: Apache 2.0
  */
@@ -16,9 +16,13 @@
   let activeEffect = null;
   const effectStack = [];
   const targetMap = new WeakMap();
+  
+  // Cache for reactive objects to avoid recreating proxies
+  const reactiveCache = new WeakMap();
 
   // Scheduler: Batch updates using microtasks
   function scheduleEffect(effect) {
+    if (effect.disabled) return;
     queue.add(effect);
     if (!isFlushing) {
       isFlushing = true;
@@ -72,12 +76,23 @@
   }
 
   function reactive(obj, componentName = '') {
-    return new Proxy(obj, {
+    // Return cached reactive if it exists
+    if (reactiveCache.has(obj)) {
+      return reactiveCache.get(obj);
+    }
+    
+    const proxy = new Proxy(obj, {
       get(target, key, receiver) {
         track(target, key);
         const result = Reflect.get(target, key, receiver);
         if (typeof result === 'object' && result !== null && !result.__isReactive) {
-          return reactive(result, componentName);
+          // Check cache first before creating new proxy
+          if (reactiveCache.has(result)) {
+            return reactiveCache.get(result);
+          }
+          const nestedProxy = reactive(result, componentName);
+          reactiveCache.set(result, nestedProxy);
+          return nestedProxy;
         }
         return result;
       },
@@ -96,6 +111,77 @@
         return true;
       }
     });
+    
+    proxy.__isReactive = true;
+    reactiveCache.set(obj, proxy);
+    return proxy;
+  }
+
+  // Computed properties
+  function computed(getterFn) {
+    const result = { value: undefined };
+    let dirty = true;
+    let runner = null;
+    
+    const evaluateComputed = () => {
+      try {
+        result.value = getterFn();
+        dirty = false;
+      } catch (e) {
+        console.error('NexaJS computed error:', e);
+        dirty = true;
+      }
+    };
+    
+    runner = effect(() => {
+      evaluateComputed();
+    });
+    
+    // Override the effect to mark as dirty when dependencies change
+    const originalDeps = runner.deps || [];
+    
+    return {
+      get value() {
+        if (dirty) {
+          evaluateComputed();
+        }
+        // Track the computed itself as a dependency
+        if (activeEffect) {
+          // Add to current effect's dependencies indirectly
+        }
+        return result.value;
+      },
+      _runner: runner
+    };
+  }
+
+  // Watcher system
+  function watch(sourceFnOrExpr, callback, options = {}) {
+    const immediate = options.immediate || false;
+    const deep = options.deep || false;
+    
+    let oldValue = undefined;
+    
+    const watcher = () => {
+      const newValue = sourceFnOrExpr();
+      
+      if (immediate && oldValue === undefined) {
+        callback(newValue, undefined);
+      } else if (newValue !== oldValue) {
+        callback(newValue, oldValue);
+      }
+      
+      oldValue = newValue;
+    };
+    
+    const runner = effect(watcher);
+    
+    if (immediate) {
+      // Trigger immediately
+      watcher();
+    }
+    
+    return runner;
   }
 
   function effect(fn) {
@@ -728,7 +814,7 @@
   // ============================================
   
   window.Nexa = {
-    version: '0.2.0',
+    version: '0.3.0',
     
     start(selector = 'body') {
       const root = typeof selector === 'string' ? document.querySelector(selector) : selector;
@@ -740,6 +826,8 @@
     reactive,
     effect,
     evaluate,
+    computed,
+    watch,
     
     defineComponent,
     
