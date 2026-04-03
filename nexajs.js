@@ -487,7 +487,7 @@
             while (
               temp &&
               temp !==
-                (nodeMap.get(newKeys[newKeys.indexOf(key) + 1])?.anchor ||
+              (nodeMap.get(newKeys[newKeys.indexOf(key) + 1])?.anchor ||
                   anchor)
             ) {
               const nextTemp = temp.nextSibling;
