@@ -151,7 +151,7 @@
         }
         // Track the computed itself as a dependency
         if (activeEffect) {
-          // Add to current effect's dependencies indirectly
+          track(result, 'value');
         }
         return result.value;
       },
