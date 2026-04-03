@@ -151,7 +151,7 @@
         }
         // Track the computed itself as a dependency
         if (activeEffect) {
-          // Add to current effect's dependencies indirectly
+          track(result, 'value');
         }
         return result.value;
       },
@@ -487,7 +487,7 @@
             while (
               temp &&
               temp !==
-                (nodeMap.get(newKeys[newKeys.indexOf(key) + 1])?.anchor ||
+              (nodeMap.get(newKeys[newKeys.indexOf(key) + 1])?.anchor ||
                   anchor)
             ) {
               const nextTemp = temp.nextSibling;
