@@ -1,7 +1,12 @@
 /**
- * NexaJS v0.6.0 - A lightweight reactive framework without build steps
+ * NexaJS v0.7.0 - A lightweight reactive framework without build steps
  * Author: Yasmany Ramos García
  * License: Apache 2.0
+ * 
+ * New in v0.7.0 "Innovation Edition":
+ * - Time-Travel Debugging (undo/redo history)
+ * - Auto-Persistence (x-persist directive)
+ * - AI-Ready Actions (async handlers with loading/error states)
  */
 
 (function () {
@@ -22,6 +27,15 @@
   
   // Global store for shared state
   let globalStore = null;
+
+  // Time-Travel Debugging State
+  const timeTravelState = {
+    history: [],
+    currentIndex: -1,
+    maxHistory: 50,
+    isRecording: true,
+    pausedTargets: new WeakSet()
+  };
 
   // Error handling utility
   function handleError(error, context = '') {
@@ -100,6 +114,114 @@
         }
       });
     }
+
+    // Time-Travel: Record state change if recording is enabled
+    if (timeTravelState.isRecording && !timeTravelState.pausedTargets.has(target)) {
+      recordStateChange(target, key);
+    }
+  }
+
+  // Time-Travel: Record state changes
+  function recordStateChange(target, key) {
+    // Only record for plain objects/arrays, not for internal structures
+    if (typeof target !== 'object' || target === null) return;
+    
+    const snapshot = JSON.parse(JSON.stringify(target));
+    const timestamp = Date.now();
+    
+    // Remove any future states if we're not at the end
+    if (timeTravelState.currentIndex < timeTravelState.history.length - 1) {
+      timeTravelState.history = timeTravelState.history.slice(0, timeTravelState.currentIndex + 1);
+    }
+    
+    // Add new state
+    timeTravelState.history.push({
+      target: target,
+      snapshot: snapshot,
+      key: key,
+      timestamp: timestamp
+    });
+    
+    // Limit history size
+    if (timeTravelState.history.length > timeTravelState.maxHistory) {
+      timeTravelState.history.shift();
+    } else {
+      timeTravelState.currentIndex++;
+    }
+    
+    // Dispatch event for devtools
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('nexajs:time-travel', {
+        detail: {
+          canUndo: timeTravelState.currentIndex > 0,
+          canRedo: timeTravelState.currentIndex < timeTravelState.history.length - 1,
+          historyLength: timeTravelState.history.length,
+          currentIndex: timeTravelState.currentIndex
+        }
+      }));
+    }
+  }
+
+  // Time-Travel: Undo last state change
+  function undo() {
+    if (timeTravelState.currentIndex <= 0 || timeTravelState.history.length === 0) {
+      return false;
+    }
+    
+    timeTravelState.isRecording = false;
+    timeTravelState.pausedTargets.add(timeTravelState.history[timeTravelState.currentIndex].target);
+    
+    const prevState = timeTravelState.history[timeTravelState.currentIndex - 1];
+    const currentState = timeTravelState.history[timeTravelState.currentIndex];
+    
+    // Restore previous state
+    Object.keys(currentState.snapshot).forEach(key => {
+      if (key in prevState.snapshot) {
+        currentState.target[key] = prevState.snapshot[key];
+      }
+    });
+    
+    timeTravelState.currentIndex--;
+    timeTravelState.isRecording = true;
+    timeTravelState.pausedTargets.delete(currentState.target);
+    
+    // Trigger update
+    trigger(currentState.target, currentState.key);
+    
+    return true;
+  }
+
+  // Time-Travel: Redo state change
+  function redo() {
+    if (timeTravelState.currentIndex >= timeTravelState.history.length - 1) {
+      return false;
+    }
+    
+    timeTravelState.isRecording = false;
+    
+    const nextState = timeTravelState.history[timeTravelState.currentIndex + 1];
+    const currentState = timeTravelState.history[timeTravelState.currentIndex];
+    
+    // Restore next state
+    Object.keys(nextState.snapshot).forEach(key => {
+      if (key in nextState.snapshot) {
+        currentState.target[key] = nextState.snapshot[key];
+      }
+    });
+    
+    timeTravelState.currentIndex++;
+    timeTravelState.isRecording = true;
+    
+    // Trigger update
+    trigger(nextState.target, nextState.key);
+    
+    return true;
+  }
+
+  // Time-Travel: Clear history
+  function clearHistory() {
+    timeTravelState.history = [];
+    timeTravelState.currentIndex = -1;
   }
 
   function reactive(obj, componentName = "") {
@@ -802,6 +924,51 @@
     });
   });
 
+  // x-persist - Auto-persistence directive for localStorage/sessionStorage
+  registerDirective("persist", (el, expr, ctx, arg, scopeNode) => {
+    const storageKey = arg || `nexajs:${expr}`;
+    const storageType = expr.includes('.') ? expr.split('.')[0] : 'local';
+    
+    const getStorage = () => {
+      if (storageType === 'session') {
+        return sessionStorage;
+      }
+      return localStorage;
+    };
+
+    // Load persisted state on init
+    try {
+      const stored = getStorage().getItem(storageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const parts = expr.split(".");
+        let obj = ctx;
+        for (let i = 0; i < parts.length - 1; i++) {
+          obj = obj[parts[i]];
+          if (!obj) break;
+        }
+        if (obj && parts[parts.length - 1] in obj) {
+          obj[parts[parts.length - 1]] = parsed;
+        }
+      }
+    } catch (e) {
+      handleError(e, `x-persist load (${storageKey})`);
+    }
+
+    // Watch for changes and persist
+    const watchFn = () => {
+      const val = evaluate(expr, ctx);
+      try {
+        getStorage().setItem(storageKey, JSON.stringify(val));
+      } catch (e) {
+        handleError(e, `x-persist save (${storageKey})`);
+      }
+    };
+
+    const runner = effect(watchFn);
+    addEffectToNode(scopeNode, runner);
+  });
+
   // x-on / @ - Enhanced with modifiers support (.once, .capture, .self, .prevent, .stop)
   registerDirective("on", (el, expr, ctx, arg, scopeNode) => {
     // Parse event name and modifiers (e.g., "click.once.prevent")
@@ -811,7 +978,11 @@
 
     const handlerFn = compileExpression(expr);
 
-    const listener = (e) => {
+    // AI-Ready: Check for async/await modifiers
+    const isAsync = modifiers.includes("async") || modifiers.includes("loading");
+    const hasLoadingState = modifiers.includes("loading");
+    
+    const listener = async (e) => {
       // Handle .self modifier
       if (modifiers.includes("self") && e.target !== el) return;
 
@@ -822,10 +993,41 @@
       if (modifiers.includes("stop")) e.stopPropagation();
 
       const eventScope = { ...ctx, $event: e };
+      
       try {
-        handlerFn(eventScope);
+        // AI-Ready: Add loading state management
+        if (hasLoadingState && ctx.$loading !== undefined) {
+          ctx.$loading = true;
+          if (ctx.$error !== undefined) ctx.$error = null;
+        }
+        
+        const result = handlerFn(eventScope);
+        
+        // Handle promise (AI actions)
+        if (result && typeof result.then === 'function') {
+          try {
+            await result;
+          } catch (err) {
+            handleError(err, `async event handler for ${eventName}`);
+            if (hasLoadingState && ctx.$error !== undefined) {
+              ctx.$error = err.message || String(err);
+            }
+          } finally {
+            if (hasLoadingState && ctx.$loading !== undefined) {
+              ctx.$loading = false;
+            }
+          }
+        }
       } catch (err) {
         handleError(err, `event handler for ${eventName}`);
+        if (hasLoadingState && ctx.$error !== undefined) {
+          ctx.$error = err.message || String(err);
+        }
+      } finally {
+        // Ensure loading state is reset
+        if (hasLoadingState && ctx.$loading !== undefined) {
+          ctx.$loading = false;
+        }
       }
 
       // Handle .once modifier - remove listener after first execution
@@ -1121,7 +1323,7 @@
   }
 
   window.Nexa = {
-    version: "0.6.0",
+    version: "0.7.0",
 
     start(selector = "body") {
       const root =
@@ -1145,6 +1347,27 @@
     
     // Global store utility
     store: createStore,
+
+    // Time-Travel Debugging API
+    timeTravel: {
+      undo,
+      redo,
+      clearHistory,
+      getState() {
+        return {
+          canUndo: timeTravelState.currentIndex > 0,
+          canRedo: timeTravelState.currentIndex < timeTravelState.history.length - 1,
+          historyLength: timeTravelState.history.length,
+          currentIndex: timeTravelState.currentIndex
+        };
+      },
+      pause() {
+        timeTravelState.isRecording = false;
+      },
+      resume() {
+        timeTravelState.isRecording = true;
+      }
+    },
 
     // Plugin system
     plugins: [],
