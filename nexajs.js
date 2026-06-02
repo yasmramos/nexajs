@@ -1,5 +1,5 @@
 /**
- * NexaJS v0.5.0 - A lightweight reactive framework without build steps
+ * NexaJS v0.6.0 - A lightweight reactive framework without build steps
  * Author: Yasmany Ramos García
  * License: Apache 2.0
  */
@@ -19,6 +19,9 @@
 
   // Cache for reactive objects to avoid recreating proxies
   const reactiveCache = new WeakMap();
+  
+  // Global store for shared state
+  let globalStore = null;
 
   // Error handling utility
   function handleError(error, context = '') {
@@ -220,18 +223,22 @@
     const deep = options.deep || false;
 
     let oldValue = undefined;
+    let isFirstRun = true;
 
     const watcher = () => {
       try {
         const newValue = sourceFnOrExpr();
 
-        if (immediate && oldValue === undefined) {
-          callback(newValue, undefined);
+        if (isFirstRun) {
+          isFirstRun = false;
+          oldValue = newValue;
+          if (immediate) {
+            callback(newValue, undefined);
+          }
         } else if (newValue !== oldValue) {
           callback(newValue, oldValue);
+          oldValue = newValue;
         }
-
-        oldValue = newValue;
       } catch (e) {
         handleError(e, 'watch callback');
       }
@@ -240,7 +247,7 @@
     const runner = effect(watcher);
 
     if (immediate) {
-      // Trigger immediately
+      // Trigger immediately after effect is set up
       try {
         watcher();
       } catch (e) {
@@ -428,6 +435,28 @@
   function registerDirective(name, handler) {
     directives[name] = handler;
   }
+
+  // x-ref directive - Access DOM elements directly
+  registerDirective("ref", (el, expr, ctx, arg, scopeNode) => {
+    const refName = arg || expr;
+    if (!refName) {
+      handleError(new Error('x-ref requires a name'), 'x-ref');
+      return;
+    }
+    
+    // Store reference in scope
+    if (ctx && typeof ctx === 'object') {
+      ctx.$refs = ctx.$refs || {};
+      ctx.$refs[refName] = el;
+    }
+    
+    // Cleanup on destroy
+    addCleanupToNode(scopeNode, () => {
+      if (ctx && ctx.$refs && ctx.$refs[refName]) {
+        delete ctx.$refs[refName];
+      }
+    });
+  });
 
   // x-cloak - Remove cloaked elements once compiled
   registerDirective("cloak", (el, expr, ctx, scopeNode) => {
@@ -1075,8 +1104,24 @@
   // 7. PUBLIC API
   // ============================================
 
+  // Global Store for shared state management
+  function createStore(initialState = {}) {
+    if (typeof initialState !== 'object' || initialState === null) {
+      handleError(new Error('store() requires an object'), 'store');
+      return reactive({});
+    }
+    
+    if (globalStore) {
+      // Return existing store if already created
+      return globalStore;
+    }
+    
+    globalStore = reactive(initialState);
+    return globalStore;
+  }
+
   window.Nexa = {
-    version: "0.5.0",
+    version: "0.6.0",
 
     start(selector = "body") {
       const root =
@@ -1097,6 +1142,9 @@
     defineComponent,
 
     registerDirective,
+    
+    // Global store utility
+    store: createStore,
 
     // Plugin system
     plugins: [],

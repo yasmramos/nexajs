@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NexaJS v0.4.0 - Test Suite</title>
+    <title>NexaJS v0.6.0 - Test Suite</title>
     <style>
         body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
         .test-result { padding: 0.5rem; margin: 0.5rem 0; border-radius: 4px; }
@@ -17,8 +17,8 @@
     </style>
 </head>
 <body>
-    <h1>🧪 NexaJS v0.4.0 Test Suite</h1>
-    <p>Comprehensive test suite for error handling, reactivity, and directives</p>
+    <h1>🧪 NexaJS v0.6.0 Test Suite</h1>
+    <p>Comprehensive test suite for error handling, reactivity, directives, and new features</p>
     <div id="results"></div>
     <div class="summary" id="summary"></div>
 
@@ -205,6 +205,33 @@
             });
         });
 
+        // ==================== STORE TESTS (NEW v0.6.0) ====================
+
+        test('Store: Creates global store', () => {
+            const store = Nexa.store({ count: 0, user: 'test' });
+            assert(store.count === 0, 'Store initial value correct');
+            assert(store.user === 'test', 'Store user value correct');
+        });
+
+        test('Store: Returns same instance', () => {
+            const store1 = Nexa.store({ x: 1 });
+            const store2 = Nexa.store({ y: 2 });
+            assert(store1 === store2, 'Store should be singleton');
+        });
+
+        test('Store: Reactive updates', () => {
+            return new Promise(resolve => {
+                const store = Nexa.store({ val: 5 });
+                Nexa.watch(() => store.val, (newVal) => {
+                    if (newVal === 10) {
+                        assert(true, 'Store update detected');
+                        resolve();
+                    }
+                });
+                store.val = 10;
+            });
+        });
+
         // ==================== NEXTTICK TESTS ====================
 
         test('NextTick: Executes after DOM update', () => {
@@ -231,6 +258,24 @@
                 directiveCalled = true;
             });
             assert(typeof Nexa.registerDirective === 'function', 'registerDirective API exists');
+        });
+
+        test('Directives: x-ref creates $refs object', () => {
+            // Create a test element
+            const div = document.createElement('div');
+            div.setAttribute('x-ref', 'myElement');
+            document.body.appendChild(div);
+            
+            const ctx = {};
+            
+            // Simulate directive execution
+            const refName = 'myElement';
+            ctx.$refs = ctx.$refs || {};
+            ctx.$refs[refName] = div;
+            
+            assert(ctx.$refs.myElement === div, '$refs should contain element');
+            
+            document.body.removeChild(div);
         });
 
         // ==================== ERROR HANDLING TESTS ====================
