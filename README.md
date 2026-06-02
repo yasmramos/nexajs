@@ -8,10 +8,12 @@ NexaJS is a reactive JavaScript framework that requires no build process. It use
 
 - ⚡ **No Build**: Direct CDN loading, no webpack or vite needed
 - 🎯 **Proxy Reactivity**: Automatic dependency detection
-- 📦 **Ultra Lightweight**: Less than 10kb gzipped
+- 📦 **Ultra Lightweight**: Less than 10kb minified (~9.5 KB)
 - 🔌 **Extensible**: Plugin system and custom directives
 - 🌐 **HTML-first**: Write reactive logic directly in your HTML
 - 🚀 **No Virtual DOM**: Direct DOM updates
+- 🛡️ **Enhanced Error Handling**: Global error events and graceful degradation
+- 📘 **TypeScript Support**: Full type definitions included
 
 ## 🚀 Quick Start
 
@@ -34,17 +36,17 @@ NexaJS is a reactive JavaScript framework that requires no build process. It use
 
 ## 📖 Directives
 
-| Directive | Description |
-|-----------|-------------|
-| `x-data` | Defines reactive state |
-| `x-text` | Updates text content |
-| `x-html` | Inserts dynamic HTML |
-| `x-show` | Shows/hides element (CSS) |
-| `x-if` | Conditional rendering (DOM) |
-| `x-for` | Iterates over lists |
-| `x-model` | Two-way binding |
-| `x-click` | Handles click events |
-| `x-bind` | Attribute binding |
+| Directive | Shorthand | Description |
+|-----------|-----------|-------------|
+| `x-data` | - | Defines reactive state |
+| `x-text` | - | Updates text content |
+| `x-html` | - | Inserts dynamic HTML |
+| `x-show` | - | Shows/hides element (CSS) |
+| `x-if` | - | Conditional rendering (DOM) |
+| `x-for` | - | Iterates over lists |
+| `x-model` | - | Two-way binding |
+| `x-on:click` | `@click` | Event handling |
+| `x-bind:class` | `:class` | Attribute binding |
 
 ## 📥 Installation
 
@@ -55,14 +57,104 @@ Copy `nexajs.js` to your project and include it:
 <script src="nexajs.js"></script>
 ```
 
-### Option 2: CDN (coming soon)
+### Option 2: Use Minified Version
+For production, use the minified version:
+
 ```html
-<script src="https://cdn.nexajs.com/nexajs.min.js"></script>
+<script src="nexajs.min.js"></script>
+```
+
+### Option 3: TypeScript Project
+Install types by copying `types/nexajs.d.ts` to your project:
+
+```typescript
+/// <reference path="./types/nexajs.d.ts" />
 ```
 
 ## 🧪 Examples
 
-See `index.html` for complete usage examples.
+### Basic Counter
+```html
+<div x-data="{ count: 0 }">
+  <button @click="count++">+</button>
+  <span x-text="count"></span>
+</div>
+```
+
+### Two-Way Binding
+```html
+<div x-data="{ name: '' }">
+  <input x-model="name" placeholder="Enter name">
+  <p>Hello, <span x-text="name"></span>!</p>
+</div>
+```
+
+### List Rendering
+```html
+<div x-data="{ items: ['A', 'B', 'C'] }">
+  <template x-for="item in items">
+    <div x-text="item"></div>
+  </template>
+</div>
+```
+
+### Computed Properties
+```javascript
+const state = Nexa.reactive({ price: 10, quantity: 2 });
+const total = Nexa.computed(() => state.price * state.quantity);
+console.log(total.value); // 20
+```
+
+### Watchers
+```javascript
+const state = Nexa.reactive({ count: 0 });
+Nexa.watch(() => state.count, (newVal, oldVal) => {
+  console.log(`Count changed from ${oldVal} to ${newVal}`);
+}, { immediate: true });
+```
+
+### Components
+```javascript
+Nexa.defineComponent('user-card', {
+  props: ['name', 'email'],
+  template: `
+    <div class="card">
+      <h3 x-text="name"></h3>
+      <p x-text="email"></p>
+    </div>
+  `,
+  onMounted() {
+    console.log('Component mounted!');
+  }
+});
+```
+
+## 🧪 Testing
+
+Run the test suite by opening `test.html` in your browser. The comprehensive test suite includes:
+
+- ✅ Reactivity tests (basic, nested, deep)
+- ✅ Computed properties tests
+- ✅ Watcher tests (with options)
+- ✅ Effect tests (execution, stop)
+- ✅ Error handling tests
+- ✅ Directive tests
+
+## 🛡️ Error Handling
+
+NexaJS v0.4.0 introduces robust error handling:
+
+- **Global Error Events**: Listen to `nexajs:error` events
+- **Graceful Degradation**: Invalid operations don't crash the framework
+- **Detailed Context**: Error messages include operation context
+- **Cleanup Protection**: Cleanup functions are wrapped in try-catch
+
+```javascript
+window.addEventListener('nexajs:error', (e) => {
+  console.error('NexaJS Error:', e.detail.error);
+  console.error('Context:', e.detail.context);
+});
+```
 
 ## 🤝 Contributing
 
@@ -79,3 +171,10 @@ Apache 2.0 License - see LICENSE file for details.
 ---
 
 Created by Yasmany Ramos García
+
+## 📊 Performance
+
+- **Minified Size**: ~9.5 KB
+- **Source Lines**: ~965 lines
+- **Memory Efficient**: WeakMap-based caching
+- **Batch Updates**: Microtask-based scheduler

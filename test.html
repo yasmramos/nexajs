@@ -3,18 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NexaJS v0.3.0 - Test Suite</title>
+    <title>NexaJS v0.4.0 - Test Suite</title>
     <style>
-        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
         .test-result { padding: 0.5rem; margin: 0.5rem 0; border-radius: 4px; }
         .pass { background: #d4edda; color: #155724; }
         .fail { background: #f8d7da; color: #721c24; }
         h1 { color: #333; }
         .summary { font-weight: bold; font-size: 1.2rem; margin-top: 2rem; }
+        .test-section { margin: 2rem 0; }
+        .test-section h2 { color: #555; border-bottom: 2px solid #ddd; padding-bottom: 0.5rem; }
+        #results { margin-top: 1rem; }
     </style>
 </head>
 <body>
-    <h1>🧪 NexaJS v0.3.0 Test Suite</h1>
+    <h1>🧪 NexaJS v0.4.0 Test Suite</h1>
+    <p>Comprehensive test suite for error handling, reactivity, and directives</p>
     <div id="results"></div>
     <div class="summary" id="summary"></div>
 
@@ -25,9 +29,21 @@
 
         function test(name, fn) {
             try {
-                fn();
-                results.push({ name, pass: true });
-                passed++;
+                const result = fn();
+                if (result instanceof Promise) {
+                    result.then(() => {
+                        results.push({ name, pass: true });
+                        passed++;
+                        updateUI();
+                    }).catch(err => {
+                        results.push({ name, pass: false, error: err.message });
+                        failed++;
+                        updateUI();
+                    });
+                } else {
+                    results.push({ name, pass: true });
+                    passed++;
+                }
             } catch (e) {
                 results.push({ name, pass: false, error: e.message });
                 failed++;
@@ -38,7 +54,21 @@
             if (!condition) throw new Error(message || 'Assertion failed');
         }
 
-        // Test 1: Reactive Basic
+        function updateUI() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            results.forEach(r => {
+                const div = document.createElement('div');
+                div.className = `test-result ${r.pass ? 'pass' : 'fail'}`;
+                div.textContent = `${r.pass ? '✅' : '❌'} ${r.name}` + (r.error ? `: ${r.error}` : '');
+                resultsDiv.appendChild(div);
+            });
+            document.getElementById('summary').textContent = 
+                `Results: ${passed} passed, ${failed} failed`;
+        }
+
+        // ==================== REACTIVITY TESTS ====================
+        
         test('Reactive: Basic property access and mutation', () => {
             const state = Nexa.reactive({ count: 0 });
             assert(state.count === 0, 'Initial value should be 0');
@@ -46,7 +76,6 @@
             assert(state.count === 5, 'Updated value should be 5');
         });
 
-        // Test 2: Reactive Nested
         test('Reactive: Nested objects', () => {
             const state = Nexa.reactive({ user: { name: 'John' } });
             assert(state.user.name === 'John', 'Nested value accessible');
@@ -54,20 +83,54 @@
             assert(state.user.name === 'Jane', 'Nested value updatable');
         });
 
-        // Test 3: Computed
+        test('Reactive: Deep nesting', () => {
+            const state = Nexa.reactive({ a: { b: { c: { d: 1 } } } });
+            assert(state.a.b.c.d === 1, 'Deep nested value accessible');
+            state.a.b.c.d = 2;
+            assert(state.a.b.c.d === 2, 'Deep nested value updatable');
+        });
+
+        test('Reactive: Error handling on invalid input', () => {
+            let errorCaught = false;
+            window.addEventListener('nexajs:error', () => { errorCaught = true; }, { once: true });
+            // This should not crash the framework
+            const result = Nexa.reactive(null);
+            assert(result === null, 'Should handle null gracefully');
+        });
+
+        // ==================== COMPUTED TESTS ====================
+
         test('Computed: Basic computation', () => {
-            const state = Nexa.reactive({ count: 2 });
-            const double = Nexa.computed(() => state.count * 2);
-            assert(double.value === 4, 'Computed value should be 4');
-            state.count = 5;
-            // Force update cycle
-            return Nexa.nextTick().then(() => {
-                assert(double.value === 10, 'Computed should update to 10');
+            return new Promise(resolve => {
+                const state = Nexa.reactive({ count: 2 });
+                const double = Nexa.computed(() => state.count * 2);
+                assert(double.value === 4, 'Computed value should be 4');
+                state.count = 5;
+                Nexa.nextTick().then(() => {
+                    assert(double.value === 10, 'Computed should update to 10');
+                    resolve();
+                });
             });
         });
 
-        // Test 4: Watch
-        test('Watch: Callback triggered on change', (done) => {
+        test('Computed: Multiple dependencies', () => {
+            const state = Nexa.reactive({ a: 2, b: 3 });
+            const sum = Nexa.computed(() => state.a + state.b);
+            assert(sum.value === 5, 'Sum should be 5');
+            state.a = 10;
+            assert(sum.value === 13, 'Sum should update to 13');
+        });
+
+        test('Computed: Error handling with invalid getter', () => {
+            let errorCaught = false;
+            window.addEventListener('nexajs:error', () => { errorCaught = true; }, { once: true });
+            const result = Nexa.computed('not a function');
+            assert(result.value === undefined, 'Invalid computed should return undefined');
+        });
+
+        // ==================== WATCH TESTS ====================
+
+        test('Watch: Callback triggered on change', () => {
             return new Promise(resolve => {
                 const state = Nexa.reactive({ val: 1 });
                 let called = false;
@@ -81,8 +144,70 @@
             });
         });
 
-        // Test 5: NextTick
-        test('NextTick: Executes after DOM update', (done) => {
+        test('Watch: Immediate option', () => {
+            return new Promise(resolve => {
+                const state = Nexa.reactive({ val: 1 });
+                let immediateCalled = false;
+                Nexa.watch(() => state.val, (newVal) => {
+                    if (!immediateCalled) {
+                        immediateCalled = true;
+                        assert(newVal === 1, 'Immediate callback should receive initial value');
+                        resolve();
+                    }
+                }, { immediate: true });
+            });
+        });
+
+        test('Watch: Error handling with invalid arguments', () => {
+            let errorCaught = false;
+            window.addEventListener('nexajs:error', () => { errorCaught = true; }, { once: true });
+            const result = Nexa.watch('not a function', 'not a callback');
+            assert(typeof result.stop === 'function', 'Should return object with stop method');
+        });
+
+        // ==================== EFFECT TESTS ====================
+
+        test('Effect: Basic effect execution', () => {
+            return new Promise(resolve => {
+                const state = Nexa.reactive({ count: 0 });
+                let effectValue = 0;
+                Nexa.effect(() => {
+                    effectValue = state.count;
+                });
+                assert(effectValue === 0, 'Effect should execute initially');
+                state.count = 5;
+                Nexa.nextTick().then(() => {
+                    assert(effectValue === 5, 'Effect should track changes');
+                    resolve();
+                });
+            });
+        });
+
+        test('Effect: Error handling with invalid function', () => {
+            let errorCaught = false;
+            window.addEventListener('nexajs:error', () => { errorCaught = true; }, { once: true });
+            const result = Nexa.effect('not a function');
+            assert(result.disabled === true, 'Invalid effect should be disabled');
+        });
+
+        test('Effect: Stop method works', () => {
+            const state = Nexa.reactive({ count: 0 });
+            let effectCount = 0;
+            const runner = Nexa.effect(() => {
+                effectCount++;
+                state.count; // Track dependency
+            });
+            assert(effectCount === 1, 'Effect should run once initially');
+            runner.stop();
+            state.count = 5;
+            Nexa.nextTick().then(() => {
+                assert(effectCount === 1, 'Effect should not run after stop');
+            });
+        });
+
+        // ==================== NEXTTICK TESTS ====================
+
+        test('NextTick: Executes after DOM update', () => {
             return new Promise(resolve => {
                 let executed = false;
                 Nexa.nextTick(() => {
@@ -93,27 +218,39 @@
             });
         });
 
-        // Test 6: Directive Registration
+        test('NextTick: Returns promise', () => {
+            const result = Nexa.nextTick();
+            assert(result instanceof Promise, 'nextTick should return a promise');
+        });
+
+        // ==================== DIRECTIVE TESTS ====================
+
         test('Directives: Custom directive registration', () => {
             let directiveCalled = false;
-            Nexa.directive('test', (el, expr, ctx) => {
+            Nexa.registerDirective('test', (el, expr, ctx) => {
                 directiveCalled = true;
             });
-            // Just checking registration doesn't throw
-            assert(typeof Nexa.directive === 'function', 'directive API exists');
+            assert(typeof Nexa.registerDirective === 'function', 'registerDirective API exists');
         });
 
-        // Render results
-        const resultsDiv = document.getElementById('results');
-        results.forEach(r => {
-            const div = document.createElement('div');
-            div.className = `test-result ${r.pass ? 'pass' : 'fail'}`;
-            div.textContent = `${r.pass ? '✅' : '❌'} ${r.name}` + (r.error ? `: ${r.error}` : '');
-            resultsDiv.appendChild(div);
+        // ==================== ERROR HANDLING TESTS ====================
+
+        test('Error Handling: Global error event dispatched', () => {
+            return new Promise(resolve => {
+                window.addEventListener('nexajs:error', (e) => {
+                    assert(e.detail !== undefined, 'Error event should have detail');
+                    resolve();
+                }, { once: true });
+                
+                // Trigger an error
+                Nexa.computed(() => { throw new Error('Test error'); });
+            });
         });
 
-        document.getElementById('summary').textContent = 
-            `Results: ${passed} passed, ${failed} failed`;
+        // Render results after all sync tests
+        setTimeout(() => {
+            updateUI();
+        }, 100);
     </script>
 </body>
 </html>

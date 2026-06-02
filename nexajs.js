@@ -1,5 +1,5 @@
 /**
- * NexaJS v0.3.0 - A lightweight reactive framework without build steps
+ * NexaJS v0.5.0 - A lightweight reactive framework without build steps
  * Author: Yasmany Ramos García
  * License: Apache 2.0
  */
@@ -20,22 +20,46 @@
   // Cache for reactive objects to avoid recreating proxies
   const reactiveCache = new WeakMap();
 
+  // Error handling utility
+  function handleError(error, context = '') {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`NexaJS Error${context ? ` in ${context}` : ''}:`, errorMessage);
+    
+    // Trigger global error event for custom handling
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('nexajs:error', { 
+        detail: { error, context } 
+      }));
+    }
+    
+    return error;
+  }
+
   // Scheduler: Batch updates using microtasks
   function scheduleEffect(effect) {
     if (effect.disabled) return;
     queue.add(effect);
     if (!isFlushing) {
       isFlushing = true;
-      Promise.resolve().then(flushQueue);
+      Promise.resolve().then(flushQueue).catch(err => handleError(err, 'scheduler'));
     }
   }
 
   function flushQueue() {
-    queue.forEach((effect) => {
-      if (!effect.disabled) effect();
-    });
-    queue.clear();
-    isFlushing = false;
+    try {
+      queue.forEach((effect) => {
+        if (!effect.disabled) {
+          try {
+            effect();
+          } catch (e) {
+            handleError(e, 'effect execution');
+          }
+        }
+      });
+    } finally {
+      queue.clear();
+      isFlushing = false;
+    }
   }
 
   // Dependency tracking
@@ -81,48 +105,69 @@
       return reactiveCache.get(obj);
     }
 
-    const proxy = new Proxy(obj, {
-      get(target, key, receiver) {
-        track(target, key);
-        const result = Reflect.get(target, key, receiver);
-        if (
-          typeof result === "object" &&
-          result !== null &&
-          !result.__isReactive
-        ) {
-          // Check cache first before creating new proxy
-          if (reactiveCache.has(result)) {
-            return reactiveCache.get(result);
+    try {
+      const proxy = new Proxy(obj, {
+        get(target, key, receiver) {
+          track(target, key);
+          const result = Reflect.get(target, key, receiver);
+          if (
+            typeof result === "object" &&
+            result !== null &&
+            !result.__isReactive
+          ) {
+            // Check cache first before creating new proxy
+            if (reactiveCache.has(result)) {
+              return reactiveCache.get(result);
+            }
+            const nestedProxy = reactive(result, componentName);
+            reactiveCache.set(result, nestedProxy);
+            return nestedProxy;
           }
-          const nestedProxy = reactive(result, componentName);
-          reactiveCache.set(result, nestedProxy);
-          return nestedProxy;
-        }
-        return result;
-      },
-      set(target, key, value, receiver) {
-        const oldValue = target[key];
-        if (oldValue === value) return true;
+          return result;
+        },
+        set(target, key, value, receiver) {
+          try {
+            const oldValue = target[key];
+            if (oldValue === value) return true;
 
-        target[key] = value;
-        trigger(target, key);
-        return true;
-      },
-      deleteProperty(target, key) {
-        const hadKey = Object.prototype.hasOwnProperty.call(target, key);
-        delete target[key];
-        if (hadKey) trigger(target, key);
-        return true;
-      },
-    });
+            target[key] = value;
+            trigger(target, key);
+            return true;
+          } catch (e) {
+            handleError(e, `reactive.set (${componentName || 'global'}.${String(key)})`);
+            return false;
+          }
+        },
+        deleteProperty(target, key) {
+          try {
+            const hadKey = Object.prototype.hasOwnProperty.call(target, key);
+            delete target[key];
+            if (hadKey) trigger(target, key);
+            return true;
+          } catch (e) {
+            handleError(e, `reactive.deleteProperty (${componentName || 'global'}.${String(key)})`);
+            return false;
+          }
+        },
+      });
 
-    proxy.__isReactive = true;
-    reactiveCache.set(obj, proxy);
-    return proxy;
+      proxy.__isReactive = true;
+      reactiveCache.set(obj, proxy);
+      return proxy;
+    } catch (e) {
+      handleError(e, `reactive (${componentName || 'global'})`);
+      // Fallback: return original object with minimal reactivity
+      return obj;
+    }
   }
 
-  // Computed properties
+  // Computed properties with improved error handling
   function computed(getterFn) {
+    if (typeof getterFn !== 'function') {
+      handleError(new Error('computed() requires a function'), 'computed');
+      return { value: undefined };
+    }
+
     const result = { value: undefined };
     let dirty = true;
     let runner = null;
@@ -132,7 +177,7 @@
         result.value = getterFn();
         dirty = false;
       } catch (e) {
-        console.error("NexaJS computed error:", e);
+        handleError(e, 'computed evaluation');
         dirty = true;
       }
     };
@@ -159,36 +204,64 @@
     };
   }
 
-  // Watcher system
+  // Watcher system with improved error handling
   function watch(sourceFnOrExpr, callback, options = {}) {
+    if (typeof sourceFnOrExpr !== 'function') {
+      handleError(new Error('watch() requires a function as first argument'), 'watch');
+      return { stop: () => {} };
+    }
+    
+    if (typeof callback !== 'function') {
+      handleError(new Error('watch() requires a callback function'), 'watch');
+      return { stop: () => {} };
+    }
+
     const immediate = options.immediate || false;
     const deep = options.deep || false;
 
     let oldValue = undefined;
 
     const watcher = () => {
-      const newValue = sourceFnOrExpr();
+      try {
+        const newValue = sourceFnOrExpr();
 
-      if (immediate && oldValue === undefined) {
-        callback(newValue, undefined);
-      } else if (newValue !== oldValue) {
-        callback(newValue, oldValue);
+        if (immediate && oldValue === undefined) {
+          callback(newValue, undefined);
+        } else if (newValue !== oldValue) {
+          callback(newValue, oldValue);
+        }
+
+        oldValue = newValue;
+      } catch (e) {
+        handleError(e, 'watch callback');
       }
-
-      oldValue = newValue;
     };
 
     const runner = effect(watcher);
 
     if (immediate) {
       // Trigger immediately
-      watcher();
+      try {
+        watcher();
+      } catch (e) {
+        handleError(e, 'watch immediate callback');
+      }
     }
 
     return runner;
   }
 
   function effect(fn) {
+    if (typeof fn !== 'function') {
+      handleError(new Error('effect() requires a function'), 'effect');
+      const dummyRunner = () => {};
+      dummyRunner.deps = [];
+      dummyRunner.cleanupFns = [];
+      dummyRunner.disabled = true;
+      dummyRunner.stop = () => {};
+      return dummyRunner;
+    }
+
     const runner = () => {
       // Cleanup previous dependencies
       if (runner.deps) {
@@ -198,7 +271,13 @@
 
       // Execute cleanup callbacks if they exist
       if (runner.cleanupFns) {
-        runner.cleanupFns.forEach((fn) => fn());
+        runner.cleanupFns.forEach((fn) => {
+          try {
+            fn();
+          } catch (e) {
+            handleError(e, 'effect cleanup');
+          }
+        });
         runner.cleanupFns = [];
       }
 
@@ -207,6 +286,9 @@
 
       try {
         return fn();
+      } catch (e) {
+        handleError(e, 'effect execution');
+        throw e; // Re-throw to allow caller to handle
       } finally {
         effectStack.pop();
         activeEffect =
@@ -225,11 +307,21 @@
         runner.deps.forEach((dep) => dep.delete(runner));
       }
       if (runner.cleanupFns) {
-        runner.cleanupFns.forEach((fn) => fn());
+        runner.cleanupFns.forEach((fn) => {
+          try {
+            fn();
+          } catch (e) {
+            handleError(e, 'effect stop cleanup');
+          }
+        });
       }
     };
 
-    runner();
+    try {
+      runner();
+    } catch (e) {
+      // Error already handled in runner
+    }
     return runner;
   }
 
@@ -337,6 +429,12 @@
     directives[name] = handler;
   }
 
+  // x-cloak - Remove cloaked elements once compiled
+  registerDirective("cloak", (el, expr, ctx, scopeNode) => {
+    el.removeAttribute("x-cloak");
+    el.style.display = "";
+  });
+
   // x-text
   registerDirective("text", (el, expr, ctx, scopeNode) => {
     const update = () => {
@@ -355,18 +453,53 @@
     addEffectToNode(scopeNode, runner);
   });
 
-  // x-show
+  // x-show - Enhanced with transition support
   registerDirective("show", (el, expr, ctx, scopeNode) => {
     const originalDisplay = el.style.display || "";
+    let isShown = false;
+    
     const update = () => {
       const show = !!evaluate(expr, ctx);
-      el.style.display = show ? originalDisplay : "none";
+      
+      if (show === isShown) return;
+      isShown = show;
+      
+      // Check for transition support
+      const hasTransition = el._transition && typeof el._transition === 'object';
+      
+      if (show) {
+        // Show element
+        if (hasTransition) {
+          const t = el._transition;
+          t.beforeEnter();
+          el.style.display = originalDisplay;
+          t.enter();
+          t.afterEnter();
+        } else {
+          el.style.display = originalDisplay;
+        }
+      } else {
+        // Hide element
+        if (hasTransition) {
+          const t = el._transition;
+          t.beforeLeave();
+          t.leave();
+          t.afterLeave();
+          // Actually hide after transition completes
+          setTimeout(() => {
+            el.style.display = "none";
+          }, 300);
+        } else {
+          el.style.display = "none";
+        }
+      }
     };
+    
     const runner = effect(update);
     addEffectToNode(scopeNode, runner);
   });
 
-  // x-if
+  // x-if - Enhanced with transition support
   registerDirective("if", (el, expr, ctx, scopeNode) => {
     const anchor = document.createComment("x-if");
     const parent = el.parentNode;
@@ -375,29 +508,74 @@
 
     let mounted = false;
     let instance = null;
+    let isLeaving = false;
 
     const update = () => {
       const show = !!evaluate(expr, ctx);
 
-      if (show === mounted) return;
+      if (show === mounted && !isLeaving) return;
 
       if (show) {
+        if (isLeaving && instance) {
+          // Cancel leave transition
+          isLeaving = false;
+          return;
+        }
+        
         if (el.tagName === "TEMPLATE") {
           const content = el.content.cloneNode(true);
           parent.insertBefore(content, anchor);
           instance = content;
 
+          // Check for transition on the first element
+          const firstElement = content.querySelector?.('[x-transition]') || 
+                              (content.nodeType === 1 ? content : null);
+          
           // Compile the new content with the same context
           compile(instance, ctx);
+          
+          // Trigger enter transition if present
+          if (firstElement && firstElement._transition) {
+            const t = firstElement._transition;
+            t.beforeEnter();
+            t.enter();
+            t.afterEnter();
+          }
         }
         mounted = true;
       } else {
         if (instance) {
-          destroyNode(instance);
-          instance.remove();
-          instance = null;
+          // Check for transition
+          const firstElement = instance.querySelector?.('[x-transition]') || 
+                              (instance.nodeType === 1 ? instance : null);
+          
+          if (firstElement && firstElement._transition && !isLeaving) {
+            // Start leave transition
+            isLeaving = true;
+            const t = firstElement._transition;
+            t.beforeLeave();
+            t.leave();
+            t.afterLeave();
+            
+            // Actually remove after transition completes
+            setTimeout(() => {
+              if (instance) {
+                destroyNode(instance);
+                instance.remove();
+                instance = null;
+              }
+              mounted = false;
+              isLeaving = false;
+            }, 300);
+            return;
+          } else {
+            destroyNode(instance);
+            instance.remove();
+            instance = null;
+          }
         }
         mounted = false;
+        isLeaving = false;
       }
     };
 
@@ -595,24 +773,43 @@
     });
   });
 
-  // x-on / @
+  // x-on / @ - Enhanced with modifiers support (.once, .capture, .self, .prevent, .stop)
   registerDirective("on", (el, expr, ctx, arg, scopeNode) => {
-    const event = arg;
+    // Parse event name and modifiers (e.g., "click.once.prevent")
+    const parts = arg.split(".");
+    const eventName = parts[0];
+    const modifiers = parts.slice(1);
+
     const handlerFn = compileExpression(expr);
 
     const listener = (e) => {
+      // Handle .self modifier
+      if (modifiers.includes("self") && e.target !== el) return;
+
+      // Handle .prevent modifier
+      if (modifiers.includes("prevent")) e.preventDefault();
+
+      // Handle .stop modifier
+      if (modifiers.includes("stop")) e.stopPropagation();
+
       const eventScope = { ...ctx, $event: e };
       try {
         handlerFn(eventScope);
       } catch (err) {
-        console.error("NexaJS event handler error:", err);
+        handleError(err, `event handler for ${eventName}`);
+      }
+
+      // Handle .once modifier - remove listener after first execution
+      if (modifiers.includes("once")) {
+        el.removeEventListener(eventName, listener, modifiers.includes("capture"));
       }
     };
 
-    el.addEventListener(event, listener);
+    const useCapture = modifiers.includes("capture");
+    el.addEventListener(eventName, listener, useCapture);
 
     addCleanupToNode(scopeNode, () => {
-      el.removeEventListener(event, listener);
+      el.removeEventListener(eventName, listener, useCapture);
     });
   });
 
@@ -663,6 +860,52 @@
 
     const runner = effect(update);
     addEffectToNode(scopeNode, runner);
+  });
+
+  // x-transition - Simple transition system for enter/leave animations
+  registerDirective("transition", (el, expr, ctx, arg, scopeNode) => {
+    const transitionName = arg || "fade";
+    
+    // Add transition classes
+    el.classList.add(`${transitionName}-enter-active`);
+    el.classList.add(`${transitionName}-leave-active`);
+    
+    // Store transition info for x-show/x-if to use
+    el._transition = {
+      name: transitionName,
+      beforeEnter: () => {
+        el.classList.add(`${transitionName}-enter-from`);
+        el.classList.remove(`${transitionName}-enter-to`);
+      },
+      enter: () => {
+        requestAnimationFrame(() => {
+          el.classList.remove(`${transitionName}-enter-from`);
+          el.classList.add(`${transitionName}-enter-to`);
+        });
+      },
+      afterEnter: () => {
+        setTimeout(() => {
+          el.classList.remove(`${transitionName}-enter-active`);
+          el.classList.remove(`${transitionName}-enter-to`);
+        }, 300); // Default duration, can be customized via CSS
+      },
+      beforeLeave: () => {
+        el.classList.add(`${transitionName}-leave-from`);
+        el.classList.remove(`${transitionName}-leave-to`);
+      },
+      leave: () => {
+        requestAnimationFrame(() => {
+          el.classList.remove(`${transitionName}-leave-from`);
+          el.classList.add(`${transitionName}-leave-to`);
+        });
+      },
+      afterLeave: () => {
+        setTimeout(() => {
+          el.classList.remove(`${transitionName}-leave-active`);
+          el.classList.remove(`${transitionName}-leave-to`);
+        }, 300);
+      }
+    };
   });
 
   // ============================================
@@ -833,7 +1076,7 @@
   // ============================================
 
   window.Nexa = {
-    version: "0.3.0",
+    version: "0.5.0",
 
     start(selector = "body") {
       const root =
