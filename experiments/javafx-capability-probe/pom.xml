@@ -77,8 +77,38 @@
         <artifactId>exec-maven-plugin</artifactId>
         <version>3.1.0</version>
         <configuration>
-          <mainClass>com.nexajs.probe.CapabilityProbeApp</mainClass>
+          <!-- Use exec:exec (separate JVM) instead of exec:java so the JavaFX
+               native libraries can be loaded via java.library.path. -->
+          <executable>java</executable>
+          <arguments>
+            <argument>-Djava.library.path=target/javafx-native</argument>
+            <argument>-classpath</argument>
+            <classpath/>
+            <argument>com.nexajs.probe.CapabilityProbeApp</argument>
+          </arguments>
         </configuration>
+      </plugin>
+      <!-- Copy JavaFX SDK jars and native .so libs to target/ so the probe
+           runs on a plain classpath with java.library.path pointing at the
+           natives (required by WebKit on Linux). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.6.1</version>
+        <executions>
+          <execution>
+            <id>copy-javafx-natives</id>
+            <phase>compile</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <includeGroupIds>org.openjfx</includeGroupIds>
+              <includeClassifiers>linux</includeClassifiers>
+              <outputDirectory>${project.basedir}/target/javafx-native</outputDirectory>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

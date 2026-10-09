@@ -56,7 +56,7 @@ jobs:
       - name: Install Xvfb and GTK/WebEngine native libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libgtk-3-0 libasound2t64 \
+          sudo apt-get install -y xvfb x11-utils libgtk-3-0 libasound2t64 \
             libfontconfig1 libgl1 libnss3 libdbus-1-3 liblcms2-2 \
             libatspi2.0-0 libx11-6 libxcomposite1 libxdamage1 libxrandr2 \
             libxtst6 libxkbcommon0 libcups2
@@ -65,13 +65,15 @@ jobs:
         run: |
           Xvfb :99 -screen 1280x1024x24 > /tmp/xvfb.log 2>&1 &
           sleep 2
+          # Fail fast if the display is not actually usable.
+          DISPLAY=:99 xdpyinfo > /dev/null || (echo "Xvfb failed to start"; cat /tmp/xvfb.log; exit 1)
 
       - name: Compile probe application
         run: mvn -B -q compile
 
       - name: Run empirical JavaScript capability test (headless)
         run: |
-          mvn -B -q exec:java \
+          mvn -B exec:exec \
             -Dexec.args="--headless --output probe-report.json" \
             2>&1 | tee probe-run.log
         timeout-minutes: 10
