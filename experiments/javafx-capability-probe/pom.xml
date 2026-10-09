@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NexaJS WebView Edition - JavaFX Capability Probe
+
+  Empirical test harness that runs the JavaScript feature-detection suite
+  inside a real JavaFX WebEngine (WebKit) and prints a JSON report to
+  stdout. Used to decide which runtime strategy NexaJS must target:
+    - Proxy/Reflect available   -> keep the native reactivity core.
+    - Proxy/Reflect missing     -> fall back to Object.defineProperty mode.
+    - ES6 syntax available      -> ship modern build; otherwise transpile to ES5.
+
+  Usage:
+    mvn -q compile exec:java                  [GUI] interactive window
+    xvfb-run -a mvn -q compile exec:java      [CI]  headless run; pass the
+        flags "headless output probe-report.json" via -Dexec.args (see README)
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.nexajs</groupId>
+  <artifactId>javafx-capability-probe</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>NexaJS JavaFX Capability Probe</name>
+  <description>Empirical JS feature detection for the JavaFX WebView engine</description>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Bump this to test other JavaFX releases (e.g. 27, 28-ea+12). -->
+    <javafx.version>27</javafx.version>
+    <javafx.platform>linux</javafx.platform>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-controls</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>${javafx.platform}</classifier>
+    </dependency>
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-web</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>${javafx.platform}</classifier>
+    </dependency>
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-graphics</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>${javafx.platform}</classifier>
+    </dependency>
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-base</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>${javafx.platform}</classifier>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <release>17</release>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <configuration>
+          <mainClass>com.nexajs.probe.CapabilityProbeApp</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -1,0 +1,99 @@
+# JavaFX Capability Probe CI
+#
+# Runs the empirical JavaScript-capability test (experiments/javafx-capability-probe)
+# inside a real JavaFX 27 WebEngine on every push to develop/main and on demand.
+# The resulting probe-report.json is uploaded as a build artifact so the team can
+# decide the NexaJS WebView Edition strategy (Proxy vs Object.defineProperty,
+# IIFE/UMD packaging, etc.).
+name: JavaFX Capability Probe
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "experiments/javafx-capability-probe/**"
+      - ".github/workflows/javafx-probe.yml"
+  pull_request:
+    paths:
+      - "experiments/javafx-capability-probe/**"
+  workflow_dispatch:
+    inputs:
+      javafx_version:
+        description: "JavaFX version to probe (e.g. 27, 28-ea+12)"
+        required: false
+        default: "27"
+
+env:
+  # Headless Xvfb display for the JavaFX toolkit (Monocle is not available in
+  # the standard OpenJFX builds, so we run a virtual framebuffer instead).
+  DISPLAY: ":99"
+
+jobs:
+  probe:
+    name: Run capability probe (JavaFX ${{ github.event.inputs.javafx_version || '27' }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: experiments/javafx-capability-probe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25 (required by JavaFX 27 binaries)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Optionally override JavaFX version
+        if: github.event.inputs.javafx_version != ''
+        run: |
+          sed -i "s|<javafx.version>.*</javafx.version>|<javafx.version>${{ github.event.inputs.javafx_version }}</javafx.version>|" pom.xml
+          grep "<javafx.version>" pom.xml
+
+      - name: Install Xvfb and GTK/WebEngine native libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libasound2t64 \
+            libfontconfig1 libgl1 libnss3 libdbus-1-3 liblcms2-2 \
+            libatspi2.0-0 libx11-6 libxcomposite1 libxdamage1 libxrandr2 \
+            libxtst6 libxkbcommon0 libcups2
+
+      - name: Start virtual framebuffer
+        run: |
+          Xvfb :99 -screen 1280x1024x24 > /tmp/xvfb.log 2>&1 &
+          sleep 2
+
+      - name: Compile probe application
+        run: mvn -B -q compile
+
+      - name: Run empirical JavaScript capability test (headless)
+        run: |
+          mvn -B -q exec:java \
+            -Dexec.args="--headless --output probe-report.json" \
+            2>&1 | tee probe-run.log
+        timeout-minutes: 10
+
+      - name: Show results summary
+        if: always()
+        run: |
+          echo "## Probe results" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f probe-report.json ]; then
+            cat probe-report.json | python3 -m json.tool | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "probe-report.json was NOT generated - see probe-run.log tail:" | tee -a "$GITHUB_STEP_SUMMARY"
+            tail -n 40 probe-run.log || true
+          fi
+
+      - name: Upload probe report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: javafx-${{ github.event.inputs.javafx_version || '27' }}-capability-report
+          path: |
+            experiments/javafx-capability-probe/probe-report.json
+            experiments/javafx-capability-probe/probe-run.log
+          retention-days: 90
+          if-no-files-found: warn
