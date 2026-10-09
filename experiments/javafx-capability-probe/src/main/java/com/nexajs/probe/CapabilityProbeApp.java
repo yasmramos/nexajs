@@ -16,7 +16,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -53,10 +55,37 @@ public class CapabilityProbeApp extends Application {
     private boolean headless = false;
     private String outputPath = null;
 
+    /**
+     * Fails fast with an actionable message when no X display is available.
+     * JavaFX's GTK/Quantum toolkit otherwise aborts deep inside
+     * {@code launch()} with the cryptic "Unable to open DISPLAY" error, which
+     * surfaces through exec-maven-plugin as an opaque mojo failure.
+     */
+    private static void requireDisplay() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("nix") || os.contains("nux") || os.contains("mac")) {
+            String display = System.getenv("DISPLAY");
+            if (display == null || display.isBlank()) {
+                System.err.println("[probe] ERROR: Unable to open DISPLAY - no X display is available.");
+                System.err.println("[probe] On CI or headless machines, run the probe inside a virtual framebuffer:");
+                System.err.println("[probe]   xvfb-run -a mvn compile exec:exec");
+                System.err.println("[probe] or start Xvfb manually and export DISPLAY (e.g. DISPLAY=:99) first.");
+                System.exit(2);
+            }
+        }
+    }
+
     @Override
     public void init() {
-        Parameters params = getParameters();
-        for (String arg : params.getRaw()) {
+        // exec-maven-plugin passes the whole ${probe.args} property as ONE
+        // argument element (verified empirically: no whitespace splitting in
+        // <arguments> or <additionalArguments>), so re-split any token that
+        // contains spaces, e.g. "--headless --output probe-report.json".
+        List<String> raw = new ArrayList<>();
+        for (String arg : getParameters().getRaw()) {
+            raw.addAll(List.of(arg.split("\\s+")));
+        }
+        for (String arg : raw) {
             switch (arg) {
                 case "--headless" -> headless = true;
                 default -> {
@@ -69,7 +98,6 @@ public class CapabilityProbeApp extends Application {
             }
         }
         // Support "--output <file>" style too.
-        var raw = params.getRaw();
         for (int i = 0; i < raw.size() - 1; i++) {
             if (raw.get(i).equals("--output")) {
                 outputPath = raw.get(i + 1);
@@ -280,6 +308,7 @@ public class CapabilityProbeApp extends Application {
     }
 
     public static void main(String[] args) {
+        requireDisplay();
         launch(args);
     }
 }

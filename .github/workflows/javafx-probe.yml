@@ -83,9 +83,24 @@ jobs:
         run: mvn -B -q compile
 
       - name: Run empirical JavaScript capability test (headless)
+        # IMPORTANT goal choice: the pom configures exec-maven-plugin for
+        # exec:EXEC (<executable>java</executable> + explicit classpath), which
+        # launches the probe in a SEPARATE JDK-25 JVM that can read the
+        # class-file-v69 JavaFX 27 jars. Running `mvn exec:java` instead would
+        # execute inside Maven's own JVM/module layer and fail with
+        # "cannot access javafx.application.Application / class file has wrong
+        # version 69.0". Program args go through -Dprobe.args (the pom property
+        # wired into <arguments>, AFTER the main class, so they reach the app
+        # and never the JVM). exec-maven-plugin passes that value as ONE raw
+        # argument; CapabilityProbeApp re-splits it on whitespace, which is why
+        # quoting several flags together here works. Wiring probe.args through
+        # additionalArguments instead would hand java the whole string as a
+        # JVM option and abort with: Unrecognized option: --headless.
+        # DISPLAY=:99 comes from the job env and the Xvfb step above; without
+        # it JavaFX aborts with "Unable to open DISPLAY".
         run: |
           mvn -B exec:exec \
-            -Dexec.args="--headless --output probe-report.json" \
+            -Dprobe.args="--headless --output probe-report.json" \
             2>&1 | tee probe-run.log
         timeout-minutes: 10
 

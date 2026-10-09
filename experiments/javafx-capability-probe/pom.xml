@@ -5,14 +5,24 @@
   Empirical test harness that runs the JavaScript feature-detection suite
   inside a real JavaFX WebEngine (WebKit) and prints a JSON report to
   stdout. Used to decide which runtime strategy NexaJS must target:
-    - Proxy/Reflect available   -> keep the native reactivity core.
-    - Proxy/Reflect missing     -> fall back to Object.defineProperty mode.
-    - ES6 syntax available      -> ship modern build; otherwise transpile to ES5.
+    Proxy/Reflect available : keep the native reactivity core.
+    Proxy/Reflect missing   : fall back to Object.defineProperty mode.
+    ES6 syntax available    : ship modern build; otherwise transpile to ES5.
 
   Usage:
-    mvn -q compile exec:java                  [GUI] interactive window
-    xvfb-run -a mvn -q compile exec:java      [CI]  headless run; pass the
-        flags "headless output probe-report.json" via -Dexec.args (see README)
+    mvn compile exec:exec                     [GUI] interactive window
+    xvfb-run -a mvn compile exec:exec         [CI]  headless run; pass the
+        flags for the probe via -Dprobe.args (see README)
+
+  NOTE on exec goals: the plugin is configured for exec:EXEC
+  (executable java plus an explicit classpath), which launches the
+  probe in a separate JVM. Do NOT use "mvn exec:java" here: it would run
+  inside Maven's own JVM/module layer and fail to load the JavaFX 27 classes
+  (class-file version 69 requires JDK 25), and it would forward -Dexec.args or
+  -Dprobe.args as raw JVM flags. Also note that without a DISPLAY (or Monocle)
+  JavaFX aborts with "Unable to open DISPLAY"; wrap the command in xvfb-run or
+  start Xvfb and export DISPLAY=:99 first (see the javafx-probe workflow in
+  .github/workflows/).
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -33,6 +43,15 @@
     <!-- Bump this to test other JavaFX releases (e.g. 27, 28-ea+12). -->
     <javafx.version>27</javafx.version>
     <javafx.platform>linux</javafx.platform>
+    <!-- Arguments forwarded to CapabilityProbeApp as a single program-argument
+         element (placed AFTER the main class in the arguments block below, so
+         they reach the application and never the JVM). exec-maven-plugin does
+         not split this value on whitespace (verified empirically with plugin
+         3.1.0), so CapabilityProbeApp re-splits it itself; both a single flag
+         like "headless" (passed as -Dprobe.args=headless) and a whole quoted
+         arg line work. Never wire this into additionalArguments: that puts it
+         before the main class, where java aborts with "Unrecognized option". -->
+    <probe.args>--headless</probe.args>
   </properties>
 
   <dependencies>
@@ -80,11 +99,27 @@
           <!-- Use exec:exec (separate JVM) instead of exec:java so the JavaFX
                native libraries can be loaded via java.library.path. -->
           <executable>java</executable>
+          <!-- Fail fast with an actionable message instead of the cryptic
+               JavaFX "Unable to open DISPLAY" when no X display is available
+               (typical on CI or SSH sessions without X forwarding). Launch
+               through a virtual framebuffer (xvfb-run) or export
+               DISPLAY=:99 after starting Xvfb. -->
+          <successProperty>probe.exec.success</successProperty>
+          <!-- The probe.args property is forwarded as a SINGLE argument element
+               placed AFTER the main class. exec-maven-plugin 3.1.0 does not
+               split it on whitespace (verified empirically for both the
+               arguments and additionalArguments blocks); wiring it through
+               additionalArguments would put it BEFORE the main class, where
+               java aborts with "Unrecognized option" because it looks like a
+               JVM flag. CapabilityProbeApp therefore re-splits any argument
+               that contains spaces into individual tokens itself, so this
+               value may be a single flag or a whole quoted arg line. -->
           <arguments>
             <argument>-Djava.library.path=target/javafx-native</argument>
             <argument>-classpath</argument>
             <classpath/>
             <argument>com.nexajs.probe.CapabilityProbeApp</argument>
+            <argument>${probe.args}</argument>
           </arguments>
         </configuration>
       </plugin>
