@@ -1,2 +1,7 @@
-# Maven build artifacts
+# Java/Maven Build Artifacts
 target/
+*.class
+
+# Logs and Temp Files
+*.log
+*.tmp

@@ -45,10 +45,17 @@ import java.util.concurrent.TimeUnit;
  */
 public class CapabilityProbeApp extends Application {
 
-    /** Minimal blank document used as the JS execution context. */
+    /** Minimal document used as the JS execution context. NOTE: JavaFX 21's
+     *  WebEngine has no loadContent(content, contentType, baseURI) overload
+     *  (verified against the API - only the 1- and 2-arg forms exist), so a
+     *  <base href> element inside the markup is what gives module scripts a
+     *  resolvable document URL. Without it the document URL is "about:blank"
+     *  and every relative/data import fails by construction - which would
+     *  turn the es6Modules probe into a false negative. */
     private static final String BLANK_HTML = """
             <!DOCTYPE html>
-            <html><head><meta charset="utf-8"><title>NexaJS Probe</title></head>
+            <html><head><meta charset="utf-8"><title>NexaJS Probe</title>\
+            <base href="https://probe.nexajs.local/index.html"></head>
             <body><div id="root"></div></body></html>
             """;
 
@@ -163,8 +170,17 @@ public class CapabilityProbeApp extends Application {
                     // JSException instead of returning a value. That is itself
                     // valuable probe data, but it must never kill the report.
                     String report = runOnFx(() -> {
-                        Object json = engine.executeScript(suite);
-                        String base = json == null ? "{}" : json.toString();
+                        Object started = engine.executeScript(suite);
+                        if (started == null) {
+                            throw new IllegalStateException("probe suite returned null");
+                        }
+                        // The suite kicks off ASYNC module probes (inline
+                        // <script type="module"> execution). Wait for them to
+                        // settle, then collect the final JSON via the
+                        // collector the suite installed on window.
+                        Thread.sleep(750);
+                        Object json = engine.executeScript("window.__collectProbeResults()");
+                        String base = json == null ? started.toString() : json.toString();
                         boolean roundTrip;
                         try {
                             Object bridgeEcho = engine.executeScript("java.echo(\"bridge-ok\");");
@@ -200,14 +216,31 @@ public class CapabilityProbeApp extends Application {
             }
             try {
                 String suite = readResource("/probe-suite.js");
-                String json = String.valueOf(engine.executeScript(suite));
-                String pretty = prettyPrintJson(json);
-                javafx.scene.control.TextArea area = new javafx.scene.control.TextArea(pretty);
-                area.setEditable(false);
-                area.setStyle("-fx-font-family: monospace;");
-                StackPane root = new StackPane(area);
-                stage.getScene().setRoot(root);
-                printReport(json);
+                engine.executeScript(suite);
+                // Wait OFF the FX thread for the async module probes to
+                // settle (sleeping on the FX thread would deadlock the very
+                // module execution we are waiting for), then collect.
+                Thread collector = new Thread(() -> {
+                    try {
+                        Thread.sleep(750);
+                        String json = runOnFx(() -> String.valueOf(
+                                engine.executeScript("window.__collectProbeResults()")));
+                        String pretty = prettyPrintJson(json);
+                        Platform.runLater(() -> {
+                            javafx.scene.control.TextArea area =
+                                    new javafx.scene.control.TextArea(pretty);
+                            area.setEditable(false);
+                            area.setStyle("-fx-font-family: monospace;");
+                            StackPane root = new StackPane(area);
+                            stage.getScene().setRoot(root);
+                        });
+                        printReport(json);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }, "probe-collector-ui");
+                collector.setDaemon(true);
+                collector.start();
             } catch (IOException e) {
                 e.printStackTrace();
             }
