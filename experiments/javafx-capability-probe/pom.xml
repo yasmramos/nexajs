@@ -15,14 +15,18 @@
         flags for the probe via -Dprobe.args (see README)
 
   NOTE on exec goals: the plugin is configured for exec:EXEC
-  (executable java plus an explicit classpath), which launches the
-  probe in a separate JVM. Do NOT use "mvn exec:java" here: it would run
-  inside Maven's own JVM/module layer and fail to load the JavaFX 27 classes
-  (class-file version 69 requires JDK 25), and it would forward -Dexec.args or
+  (executable java plus an explicit module path and classpath), which
+  launches the probe in a separate JVM with JavaFX loaded as NAMED MODULES.
+  This is required: launching the main class from the unnamed module with a
+  plain classpath makes the modular JavaFX launcher abort with
+  "JavaFX runtime components are missing". Do NOT use "mvn exec:java" here:
+  it would run inside Maven's own JVM/module layer and fail to load the
+  JavaFX classes, and it would forward -Dexec.args or
   -Dprobe.args as raw JVM flags. Also note that without a DISPLAY (or Monocle)
   JavaFX aborts with "Unable to open DISPLAY"; wrap the command in xvfb-run or
   start Xvfb and export DISPLAY=:99 first (see the javafx-probe workflow in
-  .github/workflows/).
+  .github/workflows/). Monocle is not used because the standard OpenJFX Maven
+  artifacts do not ship GlassMonocle and WebView does not work on it anyway.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -41,8 +45,11 @@
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <!-- Bump this to test other JavaFX releases (e.g. 27, 28-ea+12). -->
-    <javafx.version>27</javafx.version>
+    <javafx.version>21</javafx.version>
     <javafx.platform>linux</javafx.platform>
+    <!-- Prism pipeline for the headless run: sw (software) needs no GPU and
+         is the most stable choice under Xvfb; override with -Dprism.pipeline=... -->
+    <prism.pipeline>sw</prism.pipeline>
     <!-- Arguments forwarded to CapabilityProbeApp as a single program-argument
          element (placed AFTER the main class in the arguments block below, so
          they reach the application and never the JVM). exec-maven-plugin does
@@ -115,7 +122,18 @@
                that contains spaces into individual tokens itself, so this
                value may be a single flag or a whole quoted arg line. -->
           <arguments>
-            <argument>-Djava.library.path=target/javafx-native</argument>
+            <!-- Load JavaFX as NAMED MODULES with module path plus
+                 add-modules. This is mandatory: the probe main class lives in
+                 the unnamed module (plain classpath), and a modular JavaFX
+                 launcher then refuses to start with
+                 "JavaFX runtime components are missing". -->
+            <argument>--module-path</argument>
+            <modulepath/>
+            <argument>--add-modules</argument>
+            <argument>javafx.controls,javafx.web,javafx.graphics</argument>
+            <argument>-Dprism.order=${prism.pipeline}</argument>
+            <argument>-Dprism.verbose=true</argument>
+            <argument>-Dglass.platform=Gtk</argument>
             <argument>-classpath</argument>
             <classpath/>
             <argument>com.nexajs.probe.CapabilityProbeApp</argument>

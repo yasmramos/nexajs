@@ -56,10 +56,17 @@ public class CapabilityProbeApp extends Application {
     private String outputPath = null;
 
     /**
-     * Fails fast with an actionable message when no X display is available.
-     * JavaFX's GTK/Quantum toolkit otherwise aborts deep inside
+     * Fails fast with an actionable message when no display backend is
+     * available. JavaFX's GTK/Quantum toolkit otherwise aborts deep inside
      * {@code launch()} with the cryptic "Unable to open DISPLAY" error, which
      * surfaces through exec-maven-plugin as an opaque mojo failure.
+     *
+     * <p>Note: Monocle (the true headless platform) is deliberately NOT used
+     * here. The standard OpenJFX 21+ Maven artifacts do not ship
+     * {@code GlassMonocle}, and even with TestFX's monocle jar the WebView /
+     * WebKit engine cannot initialize on Monocle - and this probe exists
+     * precisely to test the real WebEngine. Xvfb + the GTK pipeline is the
+     * only configuration that faithfully reproduces the desktop runtime.</p>
      */
     private static void requireDisplay() {
         String os = System.getProperty("os.name", "").toLowerCase();
@@ -73,6 +80,18 @@ public class CapabilityProbeApp extends Application {
                 System.exit(2);
             }
         }
+    }
+
+    public static void main(String[] args) {
+        // Must happen BEFORE launch(): without these properties the modular
+        // JavaFX launcher either aborts ("JavaFX runtime components are
+        // missing" - fixed via --module-path in the pom) or tries the D3D/ES2
+        // pipelines, which fail under Xvfb where there is no GPU.
+        if (System.getProperty("prism.order") == null) {
+            System.setProperty("prism.order", "sw");
+        }
+        requireDisplay();
+        launch(args);
     }
 
     @Override
@@ -137,12 +156,24 @@ public class CapabilityProbeApp extends Application {
                         return;
                     }
                     String suite = readResource("/probe-suite.js");
-                    // executeScript must run on the FX thread.
+                    // executeScript must run on the FX thread. The bridge
+                    // round-trip is wrapped defensively: in sandboxed CI
+                    // environments WebKit blocks calls into Java members for
+                    // the default (file-less) content area, which throws a
+                    // JSException instead of returning a value. That is itself
+                    // valuable probe data, but it must never kill the report.
                     String report = runOnFx(() -> {
                         Object json = engine.executeScript(suite);
-                        Object bridgeEcho = engine.executeScript("java.echo(\"bridge-ok\");");
                         String base = json == null ? "{}" : json.toString();
-                        boolean roundTrip = "bridge-ok".equals(String.valueOf(bridgeEcho));
+                        boolean roundTrip;
+                        try {
+                            Object bridgeEcho = engine.executeScript("java.echo(\"bridge-ok\");");
+                            roundTrip = "bridge-ok".equals(String.valueOf(bridgeEcho));
+                        } catch (Exception bridgeFailure) {
+                            System.err.println("[probe] WARN: JS->Java bridge blocked in this environment: "
+                                    + bridgeFailure.getMessage());
+                            roundTrip = false;
+                        }
                         return base.substring(0, base.length() - 1)
                                 + ",\"bridgeRoundTrip\":" + roundTrip + "}";
                     });
@@ -307,8 +338,4 @@ public class CapabilityProbeApp extends Application {
         }
     }
 
-    public static void main(String[] args) {
-        requireDisplay();
-        launch(args);
-    }
 }

@@ -1,10 +1,15 @@
 # JavaFX Capability Probe CI
 #
 # Runs the empirical JavaScript-capability test (experiments/javafx-capability-probe)
-# inside a real JavaFX 27 WebEngine on every push to develop/main and on demand.
+# inside a real JavaFX WebEngine on every push to develop/main and on demand.
 # The resulting probe-report.json is uploaded as a build artifact so the team can
 # decide the NexaJS WebView Edition strategy (Proxy vs Object.defineProperty,
 # IIFE/UMD packaging, etc.).
+#
+# NOTE on the JavaFX version: the default is 21 LTS (class-file v65, runs on
+# JDK 21+). JavaFX 27+ binaries are class-file v69 and require JDK 25; they
+# also broke under exec:exec previously. Override via workflow_dispatch input
+# javafx_version only if you know the target JDK supports those class files.
 name: JavaFX Capability Probe
 
 on:
@@ -19,18 +24,20 @@ on:
   workflow_dispatch:
     inputs:
       javafx_version:
-        description: "JavaFX version to probe (e.g. 27, 28-ea+12)"
+        description: "JavaFX version to probe (e.g. 21, 27 requires JDK 25)"
         required: false
-        default: "27"
+        default: "21"
 
 env:
-  # Headless Xvfb display for the JavaFX toolkit (Monocle is not available in
-  # the standard OpenJFX builds, so we run a virtual framebuffer instead).
+  # Headless Xvfb display for the JavaFX toolkit. Monocle is deliberately NOT
+  # used: the standard OpenJFX Maven artifacts do not ship GlassMonocle, and
+  # WebView/WebKit cannot initialize on Monocle anyway - this probe needs the
+  # real WebEngine, so Xvfb + GTK Prism (sw pipeline) is the correct setup.
   DISPLAY: ":99"
 
 jobs:
   probe:
-    name: Run capability probe (JavaFX ${{ github.event.inputs.javafx_version || '27' }})
+    name: Run capability probe (JavaFX ${{ github.event.inputs.javafx_version || '21' }})
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,11 +47,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 25 (required by JavaFX 27 binaries)
+      - name: Set up JDK 21 (LTS; compatible with JavaFX 21 and later)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "21"
           cache: maven
 
       - name: Optionally override JavaFX version
@@ -84,16 +91,18 @@ jobs:
 
       - name: Run empirical JavaScript capability test (headless)
         # IMPORTANT goal choice: the pom configures exec-maven-plugin for
-        # exec:EXEC (<executable>java</executable> + explicit classpath), which
-        # launches the probe in a SEPARATE JDK-25 JVM that can read the
-        # class-file-v69 JavaFX 27 jars. Running `mvn exec:java` instead would
-        # execute inside Maven's own JVM/module layer and fail with
-        # "cannot access javafx.application.Application / class file has wrong
-        # version 69.0". Program args go through -Dprobe.args (the pom property
-        # wired into <arguments>, AFTER the main class, so they reach the app
-        # and never the JVM). exec-maven-plugin passes that value as ONE raw
-        # argument; CapabilityProbeApp re-splits it on whitespace, which is why
-        # quoting several flags together here works. Wiring probe.args through
+        # exec:EXEC (<executable>java</executable> + explicit module path and
+        # classpath), which launches the probe in a SEPARATE JVM that loads
+        # JavaFX as NAMED MODULES. This is what fixes "JavaFX runtime
+        # components are missing": with a plain -classpath launch of a main
+        # class in the unnamed module, the modular JavaFX launcher refuses to
+        # boot. Running `mvn exec:java` instead would execute inside Maven's
+        # own JVM/module layer and fail on the JavaFX classes. Program args go
+        # through -Dprobe.args (the pom property wired into <arguments>, AFTER
+        # the main class, so they reach the app and never the JVM).
+        # exec-maven-plugin passes that value as ONE raw argument;
+        # CapabilityProbeApp re-splits it on whitespace, which is why quoting
+        # several flags together here works. Wiring probe.args through
         # additionalArguments instead would hand java the whole string as a
         # JVM option and abort with: Unrecognized option: --headless.
         # DISPLAY=:99 comes from the job env and the Xvfb step above; without
@@ -119,7 +128,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: javafx-${{ github.event.inputs.javafx_version || '27' }}-capability-report
+          name: javafx-${{ github.event.inputs.javafx_version || '21' }}-capability-report
           path: |
             experiments/javafx-capability-probe/probe-report.json
             experiments/javafx-capability-probe/probe-run.log
