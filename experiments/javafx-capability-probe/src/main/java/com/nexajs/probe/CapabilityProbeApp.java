@@ -244,7 +244,7 @@ public class CapabilityProbeApp extends Application {
         boolean inString = false;
         for (int i = 0; i < json.length(); i++) {
             char c = json.charAt(i);
-            if (c == "\"" && (i == 0 || json.charAt(i - 1) != '\\')) {
+            if (c == '"' && (i == 0 || json.charAt(i - 1) != '\\')) {
                 inString = !inString;
             }
             if (!inString && (c == '{' || c == '[')) {
