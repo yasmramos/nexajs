@@ -63,10 +63,21 @@ jobs:
 
       - name: Start virtual framebuffer
         run: |
-          Xvfb :99 -screen 1280x1024x24 > /tmp/xvfb.log 2>&1 &
-          sleep 2
-          # Fail fast if the display is not actually usable.
-          DISPLAY=:99 xdpyinfo > /dev/null || (echo "Xvfb failed to start"; cat /tmp/xvfb.log; exit 1)
+          # NOTE: the screen geometry must be a separate argument ("-screen 0
+          # WxHxD"); passing "-screen WxHxD" makes Xvfb exit with a fatal
+          # "Required argument to -screen not specified" error.
+          Xvfb :99 -screen 0 1280x1024x24 > /tmp/xvfb.log 2>&1 &
+          # Wait until the display is actually ready (up to 30s).
+          for i in $(seq 1 30); do
+            if DISPLAY=:99 xdpyinfo > /dev/null 2>&1; then
+              echo "Xvfb is up on :99"
+              break
+            fi
+            sleep 1
+            if [ "$i" -eq 30 ]; then
+              echo "Xvfb failed to start"; cat /tmp/xvfb.log; exit 1
+            fi
+          done
 
       - name: Compile probe application
         run: mvn -B -q compile
