@@ -1,26 +1,7 @@
-# Dependencies
-node_modules/
+# Java/Maven Build Artifacts
+target/
+*.class
 
-# Build outputs
-*.min.js
-dist/
-build/
-
-# Logs
+# Logs and Temp Files
 *.log
-npm-debug.log*
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Editor directories and files
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Temporary files
-tmp/
-temp/
+*.tmp

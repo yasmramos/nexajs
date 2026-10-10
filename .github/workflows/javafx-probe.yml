@@ -1,0 +1,136 @@
+# JavaFX Capability Probe CI
+#
+# Runs the empirical JavaScript-capability test (experiments/javafx-capability-probe)
+# inside a real JavaFX WebEngine on every push to develop/main and on demand.
+# The resulting probe-report.json is uploaded as a build artifact so the team can
+# decide the NexaJS WebView Edition strategy (Proxy vs Object.defineProperty,
+# IIFE/UMD packaging, etc.).
+#
+# NOTE on the JavaFX version: the default is 21 LTS (class-file v65, runs on
+# JDK 21+). JavaFX 27+ binaries are class-file v69 and require JDK 25; they
+# also broke under exec:exec previously. Override via workflow_dispatch input
+# javafx_version only if you know the target JDK supports those class files.
+name: JavaFX Capability Probe
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "experiments/javafx-capability-probe/**"
+      - ".github/workflows/javafx-probe.yml"
+  pull_request:
+    paths:
+      - "experiments/javafx-capability-probe/**"
+  workflow_dispatch:
+    inputs:
+      javafx_version:
+        description: "JavaFX version to probe (e.g. 21, 27 requires JDK 25)"
+        required: false
+        default: "21"
+
+env:
+  # Headless Xvfb display for the JavaFX toolkit. Monocle is deliberately NOT
+  # used: the standard OpenJFX Maven artifacts do not ship GlassMonocle, and
+  # WebView/WebKit cannot initialize on Monocle anyway - this probe needs the
+  # real WebEngine, so Xvfb + GTK Prism (sw pipeline) is the correct setup.
+  DISPLAY: ":99"
+
+jobs:
+  probe:
+    name: Run capability probe (JavaFX ${{ github.event.inputs.javafx_version || '21' }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: experiments/javafx-capability-probe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (LTS; compatible with JavaFX 21 and later)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Optionally override JavaFX version
+        if: github.event.inputs.javafx_version != ''
+        run: |
+          sed -i "s|<javafx.version>.*</javafx.version>|<javafx.version>${{ github.event.inputs.javafx_version }}</javafx.version>|" pom.xml
+          grep "<javafx.version>" pom.xml
+
+      - name: Install Xvfb and GTK/WebEngine native libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils libgtk-3-0 libasound2t64 \
+            libfontconfig1 libgl1 libnss3 libdbus-1-3 liblcms2-2 \
+            libatspi2.0-0 libx11-6 libxcomposite1 libxdamage1 libxrandr2 \
+            libxtst6 libxkbcommon0 libcups2
+
+      - name: Start virtual framebuffer
+        run: |
+          # NOTE: the screen geometry must be a separate argument ("-screen 0
+          # WxHxD"); passing "-screen WxHxD" makes Xvfb exit with a fatal
+          # "Required argument to -screen not specified" error.
+          Xvfb :99 -screen 0 1280x1024x24 > /tmp/xvfb.log 2>&1 &
+          # Wait until the display is actually ready (up to 30s).
+          for i in $(seq 1 30); do
+            if DISPLAY=:99 xdpyinfo > /dev/null 2>&1; then
+              echo "Xvfb is up on :99"
+              break
+            fi
+            sleep 1
+            if [ "$i" -eq 30 ]; then
+              echo "Xvfb failed to start"; cat /tmp/xvfb.log; exit 1
+            fi
+          done
+
+      - name: Compile probe application
+        run: mvn -B -q compile
+
+      - name: Run empirical JavaScript capability test (headless)
+        # IMPORTANT goal choice: the pom configures exec-maven-plugin for
+        # exec:EXEC (<executable>java</executable> + explicit module path and
+        # classpath), which launches the probe in a SEPARATE JVM that loads
+        # JavaFX as NAMED MODULES. This is what fixes "JavaFX runtime
+        # components are missing": with a plain -classpath launch of a main
+        # class in the unnamed module, the modular JavaFX launcher refuses to
+        # boot. Running `mvn exec:java` instead would execute inside Maven's
+        # own JVM/module layer and fail on the JavaFX classes. Program args go
+        # through -Dprobe.args (the pom property wired into <arguments>, AFTER
+        # the main class, so they reach the app and never the JVM).
+        # exec-maven-plugin passes that value as ONE raw argument;
+        # CapabilityProbeApp re-splits it on whitespace, which is why quoting
+        # several flags together here works. Wiring probe.args through
+        # additionalArguments instead would hand java the whole string as a
+        # JVM option and abort with: Unrecognized option: --headless.
+        # DISPLAY=:99 comes from the job env and the Xvfb step above; without
+        # it JavaFX aborts with "Unable to open DISPLAY".
+        run: |
+          mvn -B exec:exec \
+            -Dprobe.args="--headless --output probe-report.json" \
+            2>&1 | tee probe-run.log
+        timeout-minutes: 10
+
+      - name: Show results summary
+        if: always()
+        run: |
+          echo "## Probe results" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f probe-report.json ]; then
+            cat probe-report.json | python3 -m json.tool | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "probe-report.json was NOT generated - see probe-run.log tail:" | tee -a "$GITHUB_STEP_SUMMARY"
+            tail -n 40 probe-run.log || true
+          fi
+
+      - name: Upload probe report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: javafx-${{ github.event.inputs.javafx_version || '21' }}-capability-report
+          path: |
+            experiments/javafx-capability-probe/probe-report.json
+            experiments/javafx-capability-probe/probe-run.log
+          retention-days: 90
+          if-no-files-found: warn

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexaJS v0.7.0 - Innovation Tests</title>
+  <script src="nexajs.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 0 20px; }
+    .test-section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+    .test-section h2 { color: #42b983; margin-top: 0; }
+    button { padding: 8px 16px; margin: 5px; background: #42b983; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #35966a; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    input { padding: 8px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
+    .loading { opacity: 0.6; pointer-events: none; }
+    .error { color: #ff4444; }
+    .success { color: #42b983; }
+    .time-travel-controls { background: #f0f0f0; padding: 10px; border-radius: 4px; margin: 10px 0; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>🚀 NexaJS v0.7.0 "Innovation Edition"</h1>
+  
+  <!-- Time-Travel Debugging Demo -->
+  <div class="test-section" x-data="timeTravelDemo">
+    <h2>⏰ Time-Travel Debugging</h2>
+    <p>Modifica el contador y usa los controles para viajar en el tiempo:</p>
+    <div style="font-size: 48px; text-align: center; margin: 20px;">
+      <span x-text="count"></span>
+    </div>
+    <div style="text-align: center;">
+      <button @click="increment()">Incrementar</button>
+      <button @click="decrement()">Decrementar</button>
+      <button @click="reset()">Reset</button>
+    </div>
+    <div class="time-travel-controls">
+      <strong>Controles de Viaje en el Tiempo:</strong><br>
+      <button @click="undo()" x-disabled="!canUndo">↩ Undo</button>
+      <button @click="redo()" x-disabled="!canRedo">↪ Redo</button>
+      <button @click="clearHistory()">🗑 Clear</button>
+      <span style="margin-left: 20px;">
+        Estado: <code>canUndo: <span x-text="canUndo"></span></code> | 
+        <code>canRedo: <span x-text="canRedo"></span></code> |
+        <code>Historial: <span x-text="historyLength"></span></code>
+      </span>
+    </div>
+  </div>
+
+  <!-- Auto-Persistence Demo -->
+  <div class="test-section" x-data="persistDemo">
+    <h2>💾 Auto-Persistence (x-persist)</h2>
+    <p>Los datos se guardan automáticamente en localStorage. ¡Recarga la página!</p>
+    <div>
+      <label>Nombre: <input type="text" x-model="user.name" x-persist="user.name"></label><br>
+      <label>Email: <input type="email" x-model="user.email" x-persist="user.email"></label><br>
+      <label>Puntos: <input type="number" x-model="user.points" x-persist="user.points"></label>
+    </div>
+    <div style="margin-top: 15px;">
+      <strong>Datos actuales:</strong>
+      <pre x-text="JSON.stringify(user, null, 2)"></pre>
+    </div>
+    <button @click="clearPersist()">🗑 Borrar Persistencia</button>
+  </div>
+
+  <!-- AI-Ready Actions Demo -->
+  <div class="test-section" x-data="aiDemo">
+    <h2>🤖 AI-Ready Actions (.loading modifier)</h2>
+    <p>Simulación de llamada API con estado de carga automático:</p>
+    <div>
+      <input type="text" x-model="query" placeholder="Escribe tu consulta...">
+      <button @click.loading="simulateAIRequest()">🔮 Consultar IA</button>
+    </div>
+    <div style="margin-top: 15px;">
+      <div x-show="$loading" class="loading">
+        ⏳ Procesando solicitud...
+      </div>
+      <div x-show="$error" class="error" x-text="$error"></div>
+      <div x-show="result" class="success">
+        ✅ Resultado: <strong x-text="result"></strong>
+      </div>
+    </div>
+    <div style="margin-top: 10px;">
+      <strong>Estado:</strong>
+      <code>$loading: <span x-text="$loading"></span></code> |
+      <code>$error: <span x-text="$error || 'null'"></span></code>
+    </div>
+  </div>
+
+  <script>
+    // Time-Travel Demo Component
+    Nexa.defineComponent('timeTravelDemo', () => {
+      const state = Nexa.reactive({
+        count: 0,
+        canUndo: false,
+        canRedo: false,
+        historyLength: 0
+      });
+
+      function updateTimeTravelState() {
+        const ttState = Nexa.timeTravel.getState();
+        state.canUndo = ttState.canUndo;
+        state.canRedo = ttState.canRedo;
+        state.historyLength = ttState.historyLength;
+      }
+
+      // Listen to time-travel events
+      window.addEventListener('nexajs:time-travel', updateTimeTravelState);
+      
+      // Initial update
+      setTimeout(updateTimeTravelState, 100);
+
+      return {
+        count: state.count,
+        canUndo: state.canUndo,
+        canRedo: state.canRedo,
+        historyLength: state.historyLength,
+        
+        increment() {
+          state.count++;
+          setTimeout(updateTimeTravelState, 10);
+        },
+        decrement() {
+          state.count--;
+          setTimeout(updateTimeTravelState, 10);
+        },
+        reset() {
+          state.count = 0;
+          setTimeout(updateTimeTravelState, 10);
+        },
+        undo() {
+          Nexa.timeTravel.undo();
+        },
+        redo() {
+          Nexa.timeTravel.redo();
+        },
+        clearHistory() {
+          Nexa.timeTravel.clearHistory();
+          setTimeout(updateTimeTravelState, 10);
+        }
+      };
+    });
+
+    // Persist Demo Component
+    Nexa.defineComponent('persistDemo', () => {
+      const state = Nexa.reactive({
+        user: {
+          name: '',
+          email: '',
+          points: 0
+        }
+      });
+
+      return {
+        user: state.user,
+        clearPersist() {
+          localStorage.removeItem('nexajs:user.name');
+          localStorage.removeItem('nexajs:user.email');
+          localStorage.removeItem('nexajs:user.points');
+          state.user.name = '';
+          state.user.email = '';
+          state.user.points = 0;
+        }
+      };
+    });
+
+    // AI Demo Component
+    Nexa.defineComponent('aiDemo', () => {
+      const state = Nexa.reactive({
+        $loading: false,
+        $error: null,
+        query: '',
+        result: null
+      });
+
+      return {
+        $loading: state.$loading,
+        $error: state.$error,
+        query: state.query,
+        result: state.result,
+        
+        async simulateAIRequest() {
+          if (!state.query.trim()) {
+            state.$error = 'Por favor escribe una consulta';
+            return;
+          }
+          
+          // Simular delay de API
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Simular respuesta aleatoria
+          const responses = [
+            'La respuesta es 42',
+            'Los datos sugieren una tendencia positiva',
+            'Análisis completado con éxito',
+            'Encontré 3 coincidencias relevantes'
+          ];
+          state.result = responses[Math.floor(Math.random() * responses.length)];
+          state.$error = null;
+        }
+      };
+    });
+
+    // Iniciar NexaJS
+    Nexa.start();
+  </script>
+</body>
+</html>
