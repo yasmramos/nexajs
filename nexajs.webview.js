@@ -22,20 +22,48 @@
 (function (global) {
   "use strict";
 
-  var Nexa = global.Nexa;
+  var root = typeof global !== "undefined" ? global : this;
+
+  // ES5-safe helpers (the core targets a real-ES5 baseline in places).
+  function isNaN(v) {
+    return typeof v === "number" && v !== v;
+  }
+  function assign(target /*, src1, src2... */) {
+    for (var i = 1; i < arguments.length; i++) {
+      var src = arguments[i];
+      if (!src) continue;
+      for (var k in src) {
+        if (Object.prototype.hasOwnProperty.call(src, k)) target[k] = src[k];
+      }
+    }
+    return target;
+  }
+
+  var Nexa = root.Nexa;
   if (!Nexa) {
-    console.warn(
-      "[nexajs.webview] window.Nexa not found - load nexajs.js (core) BEFORE this extension.",
-    );
+    console.warn("[nexajs.webview] window.Nexa not found - load nexajs.js (core) BEFORE this extension.");
     return;
   }
+
+  // ---- Contract with the core (verified against nexajs.js @ commit repo HEAD) ----
+  //   * core assigns `window.Nexa = {...}` explicitly (nexajs.js ~line 1567);
+  //   * `Nexa.start(selector = "body", scope = {})` accepts an optional second
+  //     argument merged into the root scope (~line 1570);
+  //   * `Nexa.version` is set by the core ("0.7.0"); we expose
+  //     `Nexa.webviewVersion` alongside it (never overwrite core fields);
+  //   * boot guard uses our own flag `Nexa._webviewStarted` (the core does not
+  //     define `_started`, so we avoid that generic name entirely).
+  // =================================================================================
 
   // ============================================================
   // 1. ENVIRONMENT DETECTION (Nexa.env)
   // ============================================================
-  var ua = (global.navigator && global.navigator.userAgent) || "";
+  var ua = (root.navigator && root.navigator.userAgent) || "";
   var fxMatch = ua.match(/JavaFX[\/ ]?(\d+(?:\.\d+)?)/i);
-  var safariMatch = ua.match(/Version\/(\d+(?:\.\d+)?).*Safari/i);
+  var wkMatch = ua.match(/AppleWebKit\/(\d+(?:\.\d+)?)/i);
+  // JavaFX WebView has no "Version/x Safari" token (it exposes "Safari/615.1"),
+  // so the WebKit build number doubles as the Safari-equivalent marker.
+  var safariEquivalent = wkMatch ? wkMatch[1] : null;
 
   function probe(fn) {
     try {
@@ -49,8 +77,8 @@
     userAgent: ua,
     isWebview: /JavaFX/i.test(ua),
     javafxVersion: fxMatch ? fxMatch[1] : null,
-    webkitVersion: null, // filled from Java bridge when available
-    safariEquivalent: safariMatch ? safariMatch[1] : null,
+    webkitVersion: safariEquivalent, // parsed from AppleWebKit/xxx in the UA
+    safariEquivalent: safariEquivalent,
     capabilities: {
       proxy: probe(function () {
         return new Proxy({}, {}) instanceof Object;
@@ -59,35 +87,36 @@
       asyncAwait: probe(function () {
         return new Function("return (async function(){})()")() instanceof Promise;
       }),
-      setImmediate: typeof global.setImmediate === "function",
-      mutationObserver: typeof global.MutationObserver === "function",
-      intersectionObserver: typeof global.IntersectionObserver === "function",
-      resizeObserver: typeof global.ResizeObserver === "function",
+      setImmediate: typeof root.setImmediate === "function",
+      mutationObserver: typeof root.MutationObserver === "function",
+      intersectionObserver: typeof root.IntersectionObserver === "function",
+      resizeObserver: typeof root.ResizeObserver === "function",
       customElements: probe(function () {
-        return !!(global.customElements && global.customElements.define);
+        return !!(root.customElements && root.customElements.define);
       }),
-      fetch: typeof global.fetch === "function",
-      intl: typeof global.Intl !== "undefined" && !!global.Intl.NumberFormat,
-      esmExecution: false, // probe-verified: WebEngine does NOT run module scripts
-    },
+      fetch: typeof root.fetch === "function",
+      intl: typeof root.Intl !== "undefined" && !!root.Intl.NumberFormat,
+      esmExecution: false // probe-verified: WebEngine does NOT run module scripts
+    }
   };
   Nexa.env = env;
+  Nexa.webviewVersion = "0.1.0"; // core keeps owning Nexa.version
 
   // ============================================================
   // 2. POLYFILLS (install only what the probe says is missing)
   // ============================================================
   if (!env.capabilities.setImmediate) {
-    global.setImmediate = function (fn) {
+    root.setImmediate = function (fn) {
       var args = Array.prototype.slice.call(arguments, 1);
-      return setTimeout.apply(global, [fn, 0].concat(args));
+      return setTimeout.apply(root, [fn, 0].concat(args));
     };
-    global.clearImmediate = function (id) {
+    root.clearImmediate = function (id) {
       clearTimeout(id);
     };
   }
 
-  if (typeof global.queueMicrotask !== "function") {
-    global.queueMicrotask = function (fn) {
+  if (typeof root.queueMicrotask !== "function") {
+    root.queueMicrotask = function (fn) {
       Promise.resolve()
         .then(fn)
         .catch(function (err) {
@@ -98,19 +127,19 @@
     };
   }
 
-  if (typeof global.requestIdleCallback !== "function") {
-    global.requestIdleCallback = function (cb) {
+  if (typeof root.requestIdleCallback !== "function") {
+    root.requestIdleCallback = function (cb) {
       var start = Date.now();
       return setTimeout(function () {
         cb({
           didTimeout: false,
           timeRemaining: function () {
             return Math.max(0, 50 - (Date.now() - start));
-          },
+          }
         });
       }, 1);
     };
-    global.cancelIdleCallback = function (id) {
+    root.cancelIdleCallback = function (id) {
       clearTimeout(id);
     };
   }
@@ -122,12 +151,16 @@
   //   window.nexaNative.invoke(method, jsonArgs, jsCallback)
   //     jsCallback receives a JSON string: {ok:true, result:...} | {ok:false, error:"..."}
   //   Java processes on a worker thread and replies via Platform.runLater.
+  //   PREFERRED: right after injecting nexaNative, Java must call
+  //     window.nexaBridgeReady()   -> instant activation, no polling needed.
+  //   The short rAF+interval watcher below is only a fallback for older JVM code.
   var pendingQueue = []; // calls made before injection
   var readyCallbacks = [];
   var bridgeReady = false;
+  var DEFAULT_CALL_TIMEOUT_MS = 10000;
 
   function nativeBridge() {
-    return global.nexaNative || null;
+    return root.nexaNative || null;
   }
 
   function markReady() {
@@ -148,21 +181,55 @@
     readyCallbacks = [];
   }
 
-  // Poll briefly for injection (WebEngine.executeScript of the bridge object
-  // usually lands within the first animation frames after document load).
+  // Explicit notification API for the Java side (preferred over polling).
+  root.nexaBridgeReady = function () {
+    stopWatching();
+    markReady();
+  };
+
+  // Fallback watcher: first animation frames (injection usually lands within
+  // them), then a cheap slow poll; gives up after ~5s with a loud warning.
+  var watchTimer = null;
+  var rafId = null;
+  function stopWatching() {
+    if (watchTimer) {
+      clearInterval(watchTimer);
+      watchTimer = null;
+    }
+    if (rafId && typeof root.cancelAnimationFrame === "function") {
+      root.cancelAnimationFrame(rafId);
+    }
+    rafId = null;
+  }
   function watchInjection() {
     if (nativeBridge()) {
       markReady();
       return;
     }
-    var tries = 0;
-    var t = setInterval(function () {
-      tries++;
+    var frames = 0;
+    var tick = function () {
       if (nativeBridge()) {
-        clearInterval(t);
+        stopWatching();
         markReady();
-      } else if (tries > 100) {
-        clearInterval(t); // 5s grace, then degrade silently
+        return true;
+      }
+      return false;
+    };
+    if (typeof root.requestAnimationFrame === "function") {
+      (function raf() {
+        if (bridgeReady || ++frames > 10) return; // ~first 10 frames only
+        if (tick()) return;
+        rafId = root.requestAnimationFrame(raf);
+      })();
+    }
+    if (bridgeReady) return;
+    var tries = 0;
+    watchTimer = setInterval(function () {
+      tries++;
+      if (tick()) return;
+      if (tries > 100) {
+        stopWatching();
+        console.warn("[nexajs.bridge] native bridge never injected - check that Java calls window.nexaBridgeReady() after executeScript().");
       }
     }, 50);
   }
@@ -194,7 +261,11 @@
           return;
         }
         if (payload && payload.ok) callback(null, payload.result);
-        else callback(new Error((payload && payload.error) || "Unknown bridge error"));
+        else {
+          var err = new Error((payload && payload.error) || "Unknown bridge error");
+          err.payload = payload; // keep full envelope (e.g. accounting error codes)
+          callback(err);
+        }
       };
       try {
         nb.invoke(method, JSON.stringify(args === undefined ? {} : args), cb);
@@ -204,10 +275,26 @@
       return null;
     },
 
-    /** Promise API - wraps the callback API. */
-    invoke: function (method, args) {
+    /** Promise API - wraps the callback API. Rejects after opts.timeoutMs
+     *  (default 10s) so queued/never-answered calls cannot hang forever. */
+    invoke: function (method, args, opts) {
+      var timeoutMs = (opts && opts.timeoutMs != null) ? opts.timeoutMs : DEFAULT_CALL_TIMEOUT_MS;
       return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timer = null;
+        if (timeoutMs > 0) {
+          timer = setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            var err = new Error("Bridge call '" + method + "' timed out after " + timeoutMs + "ms");
+            err.code = "BRIDGE_TIMEOUT";
+            reject(err);
+          }, timeoutMs);
+        }
         bridge.call(method, args, function (err, result) {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
           if (err) reject(err);
           else resolve(result);
         });
@@ -220,7 +307,7 @@
       } else {
         readyCallbacks.push(cb);
       }
-    },
+    }
   };
   Nexa.bridge = bridge;
 
@@ -231,29 +318,29 @@
     Nexa.registerModelModifier("number", {
       read: function (val) {
         var n = parseFloat(val);
-        return Number.isNaN(n) ? val : n;
-      },
+        return isNaN(n) ? val : n;
+      }
     });
     Nexa.registerModelModifier("trim", {
       read: function (val) {
         return typeof val === "string" ? val.trim() : val;
-      },
+      }
     });
     Nexa.registerModelModifier("upper", {
       read: function (val) {
         return typeof val === "string" ? val.toUpperCase() : val;
-      },
+      }
     });
     Nexa.registerModelModifier("cents", {
       // Accounting helper: input in cents units ("1250" -> 12.50)
       read: function (val) {
         var n = parseFloat(val);
-        return Number.isNaN(n) ? val : n / 100;
+        return isNaN(n) ? val : n / 100;
       },
       write: function (val) {
         var n = parseFloat(val);
-        return Number.isNaN(n) ? val : String(Math.round(n * 100));
-      },
+        return isNaN(n) ? val : String(Math.round(n * 100));
+      }
     });
   } else {
     console.warn("[nexajs.webview] core lacks registerModelModifier - .number/.trim disabled");
@@ -298,8 +385,56 @@
   // ============================================================
   // 6. DATA FORMATTING (Nexa.format / $format)
   // ============================================================
-  var locale = (global.navigator && global.navigator.language) || "es-MX";
-  var currencyCode = "MXN";
+  // Defaults: navigator.language wins when present; "es-MX"/"MXN" is only the
+  // last-resort fallback. Override at runtime with Nexa.format.setLocale("es-CU")
+  // / setCurrency("CUP") (or $format.setLocale(...) inside templates).
+  var locale = (root.navigator && root.navigator.language) || "es-MX";
+  // Currency follows the locale region when detectable (es-CU->CUP, es-ES->EUR,
+  // en-US->USD); explicit setCurrency() always wins. "MXN" is the last-resort
+  // default only when no locale/region can be detected at all.
+  function currencyForLocale(loc) {
+    var m = /[-_]([A-Za-z]{2})(?:[-_]|$)/.exec(loc || "");
+    var region = m ? m[1].toUpperCase() : "";
+    var map = { CU: "CUP", ES: "EUR", MX: "MXN", US: "USD", CA: "CAD", GB: "GBP",
+                DE: "EUR", FR: "EUR", IT: "EUR", PT: "EUR", BR: "BRL", JP: "JPY",
+                CN: "CNY", AU: "AUD", CO: "COP", AR: "ARS", VE: "USD" };
+    return map[region] || null;
+  }
+  var currencyCode = currencyForLocale(locale) || "MXN";
+  var explicitCurrency = false; // setCurrency() pins the code against locale changes
+
+  var intlNumberOk = (function () {
+    try { return new Intl.NumberFormat(locale).format(1) === "1"; } catch (e) { return false; }
+  })();
+
+  function probeSeparators(fmt) {
+    var s = fmt.format(1234567.89);
+    var thousands = ",";
+    var decimal = ".";
+    var m = s.match(/^1(.)234/);
+    if (m) thousands = m[1];
+    var d = s.match(/7(.)89$/);
+    if (d) decimal = d[1];
+    return { thousands: thousands, decimal: decimal };
+  }
+
+  // Locale-aware separators for the no-Intl fallback path (issue #6):
+  // 1st choice: Intl itself; 2nd: Java bridge ($env hint or storage-style RPC);
+  // last resort: US convention.
+  function localeSeparators() {
+    try {
+      if (intlNumberOk) return probeSeparators(new Intl.NumberFormat(locale));
+    } catch (e) {}
+    try {
+      var hints = root.__nexaEnvHints; // optional JSON injected by Java alongside nexaNative
+      if (hints) {
+        if (typeof hints === "string") hints = JSON.parse(hints);
+        if (hints.thousandsSeparator && hints.decimalSeparator)
+          return { thousands: hints.thousandsSeparator, decimal: hints.decimalSeparator };
+      }
+    } catch (e) {}
+    return { thousands: ",", decimal: "." };
+  }
 
   function manualGrouping(numStr, thousandsSep, decimalSep, decimals) {
     var parts = numStr.split(".");
@@ -322,9 +457,14 @@
 
   var format = {
     setLocale: function (l) {
+      var prev = locale;
       locale = l || locale;
+      // When the locale changes and no explicit currency was set, follow the
+      // new locale's region automatically (es-CU -> CUP, es-ES -> EUR, ...).
+      if (l && l !== prev && !explicitCurrency) currencyCode = currencyForLocale(locale) || currencyCode;
     },
     setCurrency: function (c) {
+      if (c) explicitCurrency = true;
       currencyCode = c || currencyCode;
     },
 
@@ -334,10 +474,12 @@
       try {
         return new Intl.NumberFormat(locale, {
           minimumFractionDigits: decimals == null ? 2 : decimals,
-          maximumFractionDigits: decimals == null ? 2 : decimals,
+          maximumFractionDigits: decimals == null ? 2 : decimals
         }).format(n);
       } catch (e) {
-        return manualGrouping(String(n.toFixed(decimals == null ? 2 : decimals)), ",", ".", -1);
+        // Fallback respects the locale's own separators (issue #6).
+        var sep = localeSeparators();
+        return manualGrouping(String(n.toFixed(decimals == null ? 2 : decimals)), sep.thousands, sep.decimal, -1);
       }
     },
 
@@ -350,7 +492,7 @@
           style: "currency",
           currency: cur,
           minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
+          maximumFractionDigits: 2
         }).format(n);
       } catch (e) {
         return cur + " " + format.number(n, 2);
@@ -364,33 +506,57 @@
         return new Intl.NumberFormat(locale, {
           style: "percent",
           minimumFractionDigits: decimals == null ? 1 : decimals,
-          maximumFractionDigits: decimals == null ? 1 : decimals,
+          maximumFractionDigits: decimals == null ? 1 : decimals
         }).format(n);
       } catch (e) {
         return format.number(n * 100, decimals == null ? 1 : decimals) + "%";
       }
     },
 
-    date: function (value) {
+    /** date(value[, pattern]) - pattern supports dd/mm/yyyy/yy/hh/MM/SS tokens.
+     *  Without a pattern it uses the locale default (Intl.DateTimeFormat). */
+    date: function (value, pattern) {
       var d = value instanceof Date ? value : new Date(value);
       if (isNaN(d.getTime())) return "";
+      if (pattern) return applyDatePattern(d, pattern);
       try {
         return new Intl.DateTimeFormat(locale).format(d);
       } catch (e) {
-        return d.toISOString().slice(0, 10);
+        return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + "/" + d.getFullYear();
       }
     },
 
-    datetime: function (value) {
+    datetime: function (value, pattern) {
       var d = value instanceof Date ? value : new Date(value);
       if (isNaN(d.getTime())) return "";
+      if (pattern) return applyDatePattern(d, pattern);
       try {
         return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(d);
       } catch (e) {
-        return d.toISOString().replace("T", " ").slice(0, 16);
+        return applyDatePattern(d, "dd/mm/yyyy hh:MM");
       }
-    },
+    }
   };
+
+  function pad2(v) {
+    v = String(v);
+    return v.length < 2 ? "0" + v : v;
+  }
+  function applyDatePattern(d, pattern) {
+    var map = {
+      yyyy: String(d.getFullYear()),
+      yy: pad2(d.getFullYear() % 100),
+      mm: pad2(d.getMonth() + 1), // month number (accounting convention)
+      dd: pad2(d.getDate()),
+      hh: pad2(d.getHours()),
+      MM: pad2(d.getMinutes()),
+      SS: pad2(d.getSeconds())
+    };
+    return pattern.replace(/yyyy|yy|mm|dd|hh|MM|SS/g, function (t) {
+      return map[t];
+    });
+  }
+
   Nexa.format = format;
 
   // ============================================================
@@ -399,44 +565,59 @@
   var localOk = (function () {
     try {
       var k = "__nexa_probe__";
-      global.localStorage.setItem(k, "1");
-      global.localStorage.removeItem(k);
+      root.localStorage.setItem(k, "1");
+      root.localStorage.removeItem(k);
       return true;
     } catch (e) {
       return false; // file:// can fail silently in WebKit
     }
   })();
 
+  function readLocal(key) {
+    if (!localOk) return null;
+    try {
+      return root.localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+  function writeLocal(key, value) {
+    if (!localOk) return false;
+    try {
+      root.localStorage.setItem(key, String(value));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  function deleteLocal(key) {
+    if (!localOk) return false;
+    try {
+      root.localStorage.removeItem(key);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   var storage = {
     get isLocalAvailable() {
       return localOk;
     },
-    getItem: function (key) {
-      if (!localOk) return null;
-      try {
-        return global.localStorage.getItem(key);
-      } catch (e) {
-        return null;
-      }
+    // Clean primary API: get/set/remove (+ async Java-backed variants).
+    get: function (key) {
+      return readLocal(key);
     },
-    setItem: function (key, value) {
-      if (!localOk) return false;
-      try {
-        global.localStorage.setItem(key, String(value));
-        return true;
-      } catch (e) {
-        return false;
-      }
+    set: function (key, value) {
+      return writeLocal(key, value);
     },
-    removeItem: function (key) {
-      if (!localOk) return false;
-      try {
-        global.localStorage.removeItem(key);
-        return true;
-      } catch (e) {
-        return false;
-      }
+    remove: function (key) {
+      return deleteLocal(key);
     },
+    // Deprecated localStorage-style aliases (kept for compatibility).
+    getItem: readLocal,
+    setItem: writeLocal,
+    removeItem: deleteLocal,
     // Async Java-backed variants (work regardless of localOk)
     setAsync: function (key, value) {
       return bridge.invoke("storage.set", { key: key, value: String(value) });
@@ -446,7 +627,7 @@
     },
     removeAsync: function (key) {
       return bridge.invoke("storage.remove", { key: key });
-    },
+    }
   };
   Nexa.storage = storage;
 
@@ -475,13 +656,15 @@
           resolve(true);
         }
       });
-      // Never block startup forever: proceed without bridge after 3s.
+      // Never block startup forever: proceed without bridge after 1s.
+      // (With the recommended nexaBridgeReady() notification this resolves
+      // almost immediately; the timeout only guards broken JVM wiring.)
       setTimeout(function () {
         if (!done) {
           done = true;
           resolve(false);
         }
-      }, 3000);
+      }, 1000);
     });
   }
 
@@ -493,10 +676,29 @@
       });
   };
 
-  // Auto-boot: if directives exist in the DOM and nobody called start yet.
+  // Auto-boot: whenever nobody called start yet and any directive is present.
+  // Dynamic shorthands (@click, :href) are not valid CSS attribute names, so we
+  // scan attributes manually instead of relying on exotic selector syntax.
+  function hasNexaMarkup(doc) {
+    var DIRECTIVES = ["x-data","x-if","x-for","x-model","x-init","x-text","x-show",
+      "x-bind","x-html","x-ref","x-persist","x-component","x-effect","x-cloak","x-on"];
+    var nodes = doc.querySelectorAll("*");
+    for (var i = 0; i < nodes.length; i++) {
+      var attrs = nodes[i].attributes;
+      if (!attrs) continue;
+      for (var j = 0; j < attrs.length; j++) {
+        var n = attrs[j].name;
+        if (n.charAt(0) === "@" || n.charAt(0) === ":") return true; // shorthand directives
+        for (var k = 0; k < DIRECTIVES.length; k++) {
+          if (n === DIRECTIVES[k] || n.indexOf(DIRECTIVES[k] + ".") === 0) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   Nexa.ready(function () {
-    var hasDirectives = document.querySelector("[x-data],[x-if],[x-for],[x-model],[x-init],[x-text],[x-show],[x-bind]");
-    if (hasDirectives && !Nexa._started) {
+    if (!Nexa._webviewStarted && hasNexaMarkup(document)) {
       Nexa.start();
     }
   });
@@ -511,7 +713,7 @@
     }
   }
 
-  global.addEventListener("error", function (e) {
+  root.addEventListener("error", function (e) {
     reportError({
       type: "window.onerror",
       message: e.message || "Unknown error",
@@ -520,18 +722,18 @@
       line: e.lineno,
       column: e.colno,
       timestamp: new Date().toISOString(),
-      userAgent: ua,
+      userAgent: ua
     });
   });
 
-  global.addEventListener("unhandledrejection", function (e) {
+  root.addEventListener("unhandledrejection", function (e) {
     var r = e.reason;
     reportError({
       type: "unhandledrejection",
       message: (r && r.message) || String(r),
       stack: r && r.stack ? String(r.stack).slice(0, 4000) : null,
       timestamp: new Date().toISOString(),
-      userAgent: ua,
+      userAgent: ua
     });
   });
 
@@ -546,9 +748,9 @@
       $bridge: bridge,
       $format: format,
       $storage: storage,
-      $env: env,
+      $env: env
     };
-    Nexa._started = true;
-    return originalStart.call(Nexa, selector, Object.assign({}, rootHelpers, extraScope || {}));
+    Nexa._webviewStarted = true;
+    return originalStart.call(Nexa, selector, assign({}, rootHelpers, extraScope || {}));
   };
-})(window);
+})(typeof window !== "undefined" ? window : this);

@@ -156,6 +156,33 @@ window.addEventListener('nexajs:error', (e) => {
 });
 ```
 
+## 🖥️ JavaFX WebView (nexajs.webview.js)
+
+NexaJS runs inside JavaFX `WebView` (WebKit 615.x, no ESM execution — bundle as classic `<script>`). The companion layer `nexajs.webview.js` adds the desktop-specific glue on top of the core:
+
+```html
+<script src="nexajs.js"></script>        <!-- core first -->
+<script src="nexajs.webview.js"></script><!-- then the webview companion -->
+```
+
+**Contract with the core (verified in nexajs.js):**
+- Core exposes `window.Nexa = { ... }` explicitly at the end of its IIFE.
+- `Nexa.start(selector = "body", scope = {})` — the second argument is merged into the root scope; the companion injects `$bridge`, `$format`, `$storage`, `$env` there.
+- The core has no `_started` flag; the companion uses its own `Nexa._webviewStarted` guard and exposes `Nexa.webviewVersion`.
+
+**Bridge lifecycle (Java side):** after injecting `window.nexaNative`, call from `Worker.State.SUCCEEDED`:
+
+```java
+webEngine.executeScript("...inject nexaNative...");
+webEngine.executeScript("window.nexaBridgeReady && window.nexaBridgeReady();");
+```
+
+`nexaBridgeReady()` activates the bridge instantly; a low-frequency polling fallback (rAF frames, then slow interval, warn after ~5 s) keeps older JVM builds working.
+
+**Key APIs:** `Nexa.bridge.invoke(method, args, {timeoutMs})` (errors carry `err.payload` / `err.code`), `Nexa.format.currency/number/date(value, pattern)` (locale-aware fallbacks, `dd/MM/yyyy` patterns supported), `Nexa.storage.get/set/remove` (+ async variants), `Nexa.env` (UA probes incl. `webkitVersion`/`safariEquivalent` parsed from `AppleWebKit/…`). Defaults: `navigator.language` wins and the currency follows its region automatically (`es-CU`→CUP, `es-ES`→EUR, `en-US`→USD; `MXN` only when no region is detectable) — pin either explicitly with `Nexa.format.setLocale()/setCurrency()`.
+
+Capability data for this target lives in `experiments/javafx-capability-probe/probe-report.json` (run headless with `xvfb-run -a mvn -B compile exec:exec -Dprobe.args="--headless --output probe-report.json"`).
+
 ## 🤝 Contributing
 
 1. Fork the repository
