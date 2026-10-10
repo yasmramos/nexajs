@@ -558,6 +558,64 @@
     directives[name] = handler;
   }
 
+  // ============================================
+  // 4b. EXTENSION HOOKS (model/event modifiers)
+  // ============================================
+  // Extensions like nexajs.webview.js register modifiers here so x-model and
+  // x-on stay open for extension without patching the core. Unknown modifiers
+  // are ignored by default (degrade gracefully).
+
+  const modelModifiers = {};
+  const eventModifiers = {};
+
+  function registerModelModifier(name, def) {
+    modelModifiers[name] = def || {};
+  }
+
+  function registerEventModifier(name, fn) {
+    eventModifiers[name] = fn;
+  }
+
+  // Apply registered model modifiers to an incoming view value.
+  // Each modifier may define: read(val, el) -> transformed value written to
+  // the model, and/or write(val, el) -> transformed value rendered into the
+  // view. Order is registration order.
+  function applyModelModifiers(value, modifiers, el) {
+    let val = value;
+    modifiers.forEach((m) => {
+      const def = modelModifiers[m];
+      if (def && typeof def.read === "function") {
+        val = def.read(val, el);
+      }
+    });
+    return val;
+  }
+
+  function applyModelWriteModifiers(value, modifiers, el) {
+    let val = value;
+    modifiers.forEach((m) => {
+      const def = modelModifiers[m];
+      if (def && typeof def.write === "function") {
+        val = def.write(val, el);
+      }
+    });
+    return val;
+  }
+
+  // Wrap a listener with registered event modifiers. Each modifier receives
+  // (next, el, ctx, opts) and returns the wrapped listener; applied in
+  // reverse registration order so the first-registered runs outermost.
+  function applyEventModifiers(listener, modifiers, el, ctx, opts) {
+    let fn = listener;
+    [...modifiers].reverse().forEach((m) => {
+      const reg = eventModifiers[m];
+      if (typeof reg === "function") {
+        fn = reg(fn, el, ctx, Object.assign({}, opts, { modifiers }));
+      }
+    });
+    return fn;
+  }
+
   // x-ref directive - Access DOM elements directly
   registerDirective("ref", (el, expr, ctx, arg, scopeNode) => {
     const refName = arg || expr;
@@ -867,10 +925,36 @@
     });
   });
 
-  // x-model
-  registerDirective("model", (el, expr, ctx, scopeNode) => {
+  // x-model - supports extensible modifiers via registerModelModifier:
+  // .number, .trim, .lazy, .debounce(ms) are provided by nexajs.webview.js;
+  // unknown modifiers degrade gracefully (ignored).
+  registerDirective("model", (el, expr, ctx, arg, scopeNode) => {
+    // Parse modifiers from the directive attribute name (x-model.number.trim)
+    // or from the expression value ("foo .number" style fallback).
+    let modelName = expr;
+    let modifiers = [];
+    const modMatch = expr.match(/\s+\.([a-zA-Z0-9=._-]+(\s+\.[a-zA-Z0-9=._-]+)*)\s*$/);
+    if (modMatch) {
+      modelName = expr.slice(0, modMatch.index).trim();
+      modifiers = modMatch[1].split(/\s*\.\s*/).filter(Boolean);
+    } else if (arg) {
+      // x-model:foo.style (rare) - arg carries the name, expr the mods
+      modelName = arg;
+      modifiers = expr.split(".").filter(Boolean);
+    }
+
+    const isLazy = modifiers.includes("lazy");
+    const debounceMs = (() => {
+      const kv = modifiers.find((m) => /^debounceMs=(\d+)$/.test(m));
+      if (kv) return parseInt(kv.split("=")[1], 10);
+      const hit = modifiers.find((m) => m.startsWith("debounce"));
+      if (!hit) return 0;
+      const n = parseInt((hit.match(/(\d+)/) || [])[1], 10);
+      return Number.isFinite(n) ? n : 150;
+    })();
+
     const setVal = (val) => {
-      const parts = expr.split(".");
+      const parts = modelName.split(".");
       let obj = ctx;
       for (let i = 0; i < parts.length - 1; i++) {
         obj = obj[parts[i]];
@@ -882,10 +966,12 @@
       }
     };
 
-    const getVal = () => evaluate(expr, ctx);
+    const getVal = () => evaluate(modelName, ctx);
 
     const updateView = () => {
-      const val = getVal();
+      const raw = getVal();
+      // Let registered modifiers render the value into the view (.number etc.)
+      const val = applyModelWriteModifiers(raw, modifiers, el);
       if (el.type === "checkbox") {
         el.checked = !!val;
       } else if (el.type === "radio") {
@@ -897,19 +983,32 @@
       }
     };
 
-    const updateModel = (e) => {
+    const commit = (e) => {
       let val;
       if (el.type === "checkbox") {
         val = el.checked;
-      } else if (el.type === "number") {
-        val = parseFloat(el.value) || (el.value === "" ? "" : NaN);
+      } else if (el.type === "number" || modifiers.includes("number")) {
+        val = parseFloat(el.value);
+        if (Number.isNaN(val)) val = el.value === "" ? "" : NaN;
       } else {
         val = el.value;
       }
+      // Apply registered read modifiers (.trim, .number, ...)
+      val = applyModelModifiers(val, modifiers, el);
       setVal(val);
     };
 
-    el.addEventListener("input", updateModel);
+    // Event strategy: .lazy listens on change only; .debounce delays input.
+    const inputEvent = isLazy ? "change" : "input";
+    let timer = null;
+    const updateModel = debounceMs
+      ? (e) => {
+          clearTimeout(timer);
+          timer = setTimeout(() => commit(e), debounceMs);
+        }
+      : commit;
+
+    el.addEventListener(inputEvent, updateModel);
     if (el.type === "checkbox" || el.type === "radio") {
       el.addEventListener("change", updateModel);
     }
@@ -919,9 +1018,62 @@
 
     // Cleanup event listeners
     addCleanupToNode(scopeNode, () => {
-      el.removeEventListener("input", updateModel);
+      clearTimeout(timer);
+      el.removeEventListener(inputEvent, updateModel);
       el.removeEventListener("change", updateModel);
+      el.removeEventListener("input", updateModel);
     });
+  });
+
+  // x-data - element scope. The attribute value is an object literal or any
+  // expression evaluated against the parent scope; the result is wrapped in
+  // reactive() so mutations trigger effects. Children see the merged scope.
+  registerDirective("data", (el, expr, ctx, arg, scopeNode) => {
+    if (el._nexaDataDone) return;
+    el._nexaDataDone = true;
+
+    let dataObj = {};
+    try {
+      const fn = compileExpression(expr);
+      const result = fn(ctx);
+      dataObj = result && typeof result === "object" ? result : {};
+    } catch (err) {
+      handleError(err, `x-data (${expr})`);
+      dataObj = {};
+    }
+
+    const state = reactive(dataObj);
+    // Merge into a plain scope object; writes through scope go to the proxy.
+    const scope = Object.create(null);
+    Object.assign(scope, ctx);
+    Object.keys(state).forEach((k) => {
+      Object.defineProperty(scope, k, {
+        enumerable: true,
+        configurable: true,
+        get: () => state[k],
+        set: (v) => {
+          state[k] = v;
+        },
+      });
+    });
+
+    el._scope = scope;
+    compile(el, scope);
+  });
+
+  // x-init - evaluates an expression once when the element is mounted.
+  // Needed by webview apps to auto-load data on startup.
+  registerDirective("init", (el, expr, ctx, arg, scopeNode) => {
+    if (el._nexaInitDone) return;
+    el._nexaInitDone = true;
+    try {
+      const result = evaluate(expr, ctx);
+      if (result && typeof result.then === "function") {
+        result.catch((err) => handleError(err, `x-init (${expr})`));
+      }
+    } catch (err) {
+      handleError(err, `x-init (${expr})`);
+    }
   });
 
   // x-persist - Auto-persistence directive for localStorage/sessionStorage
@@ -971,10 +1123,43 @@
 
   // x-on / @ - Enhanced with modifiers support (.once, .capture, .self, .prevent, .stop)
   registerDirective("on", (el, expr, ctx, arg, scopeNode) => {
-    // Parse event name and modifiers (e.g., "click.once.prevent")
+    // Parse event name and modifiers. Two accepted forms:
+    //   x-on:click.prevent / @input.debounce-300  (arg carries event + mods)
+    //   "handler() .prevent.stop"                 (mods appended to expression)
     const parts = arg.split(".");
     const eventName = parts[0];
-    const modifiers = parts.slice(1);
+    let modifiers = parts.slice(1);
+
+    // Support debounce-N / throttle-N syntax anywhere in the modifier list.
+    modifiers = modifiers.flatMap((m) => {
+      const dm = m.match(/^debounce-(\d+)$/);
+      if (dm) return ["debounce", `debounceMs=${dm[1]}`];
+      const tm = m.match(/^throttle-(\d+)$/);
+      if (tm) return ["throttle", `throttleMs=${tm[1]}`];
+      return [m];
+    });
+
+    // Extract trailing " .mod.mod" tokens from the expression itself.
+    const modMatch = expr.match(/\s+\.([a-zA-Z0-9=._-]+(\s+\.[a-zA-Z0-9=._-]+)*)\s*$/);
+    if (modMatch) {
+      expr = expr.slice(0, modMatch.index).trim();
+      modMatch[1].split(/\s*\.\s*/).forEach((token) => {
+        if (!token) return;
+        const dm = token.match(/^debounce-(\d+)$/);
+        const tm = token.match(/^throttle-(\d+)$/);
+        if (dm) modifiers.push("debounce", `debounceMs=${dm[1]}`);
+        else if (tm) modifiers.push("throttle", `throttleMs=${tm[1]}`);
+        else modifiers.push(token);
+      });
+    }
+
+    // Built-in convenience: .debounceMs=N / .throttleMs=N tokens become opts
+    // for the registered wrappers of the same name.
+    const modifierOpts = {};
+    modifiers.forEach((m) => {
+      const kv = m.match(/^(debounceMs|throttleMs)=(\d+)$/);
+      if (kv) modifierOpts[kv[1]] = parseInt(kv[2], 10);
+    });
 
     const handlerFn = compileExpression(expr);
 
@@ -992,8 +1177,12 @@
       // Handle .stop modifier
       if (modifiers.includes("stop")) e.stopPropagation();
 
-      const eventScope = { ...ctx, $event: e };
-      
+      const eventScope = new Proxy(ctx, {
+        get(target, prop) {
+          if (prop === "$event") return e;
+          return target[prop];
+        },
+      });
       try {
         // AI-Ready: Add loading state management
         if (hasLoadingState && ctx.$loading !== undefined) {
@@ -1037,10 +1226,24 @@
     };
 
     const useCapture = modifiers.includes("capture");
-    el.addEventListener(eventName, listener, useCapture);
+
+    // Extension hook: registered event modifiers (.debounce, .throttle and any
+    // custom ones) wrap the base listener. Unknown names are ignored.
+    const wrapperNames = modifiers.filter(
+      (m) => eventModifiers[m] && !/^(debounceMs|throttleMs)=/.test(m),
+    );
+    const finalListener = applyEventModifiers(
+      listener,
+      wrapperNames,
+      el,
+      ctx,
+      Object.assign({ eventName, capture: useCapture }, modifierOpts),
+    );
+
+    el.addEventListener(eventName, finalListener, useCapture);
 
     addCleanupToNode(scopeNode, () => {
-      el.removeEventListener(eventName, listener, useCapture);
+      el.removeEventListener(eventName, finalListener, useCapture);
     });
   });
 
@@ -1262,30 +1465,67 @@
         return;
       }
 
-      // Process directives
+      // Process directives (iterate a snapshot; x-data removes its own attr)
       const attrs = Array.from(el.attributes);
       const scopeNode = el._scopeNode || el;
-      const currentScope = el._scope || context;
+      let currentScope = el._scope || context;
+
+      // x-data first so siblings/descendants get the element scope.
+      const dataAttr = attrs.find((a) => a.name === "x-data");
+      if (dataAttr && !el._nexaDataDone) {
+        directives["data"](el, dataAttr.value, currentScope, null, scopeNode);
+        el.removeAttribute("x-data");
+        currentScope = el._scope || currentScope;
+      }
 
       attrs.forEach((attr) => {
-        const name = attr.name;
+        const rawName = attr.name;
         const value = attr.value;
+
+        // Extract modifiers from directive attributes (Alpine-style):
+        // x-model.number.trim / x-on:click.prevent.debounce-300 / @input.lazy
+        let name = rawName;
+        let extraModifiers = [];
+        if (/^(x-[a-z]+(:[a-zA-Z-]+)?|@[a-zA-Z-]+)$/i.test(rawName)) {
+          const dotIdx = rawName.indexOf(".", rawName.startsWith("@") ? 1 : 2);
+          if (dotIdx > 0) {
+            name = rawName.slice(0, dotIdx);
+            extraModifiers = rawName
+              .slice(dotIdx + 1)
+              .split(".")
+              .filter(Boolean);
+          }
+        }
 
         // Shorthand for @ (x-on:)
         if (name.startsWith("@")) {
           const event = name.slice(1);
-          directives["on"](el, value, currentScope, event, scopeNode);
-          el.removeAttribute(name);
+          directives["on"](
+            el,
+            extraModifiers.length
+              ? value + " ." + extraModifiers.join(".")
+              : value,
+            currentScope,
+            event,
+            scopeNode,
+          );
+          el.removeAttribute(rawName);
         }
         // Shorthand for : (x-bind:)
         else if (name.startsWith(":")) {
           const arg = name.slice(1);
           directives["bind"](el, value, currentScope, arg, scopeNode);
-          el.removeAttribute(name);
+          el.removeAttribute(rawName);
         }
         // Full x- directives
         else if (name.startsWith("x-")) {
-          const directiveName = name.slice(2);
+          let directiveName = name.slice(2);
+          let expr = value;
+          // Append attribute-name modifiers to the expression in a form the
+          // directive handlers understand ("expr .mod1.mod2").
+          if (extraModifiers.length) {
+            expr = value + " ." + extraModifiers.join(".");
+          }
           const handler = directives[directiveName];
 
           if (handler) {
@@ -1293,9 +1533,11 @@
             // Handle directives with arguments like x-bind:class
             if (directiveName.includes(":")) {
               const parts = directiveName.split(":");
+              directiveName = parts[0];
               arg = parts[1];
             }
-            handler(el, value, currentScope, arg, scopeNode);
+            handler(el, expr, currentScope, arg, scopeNode);
+            el.removeAttribute(rawName);
           }
         }
       });
@@ -1325,13 +1567,13 @@
   window.Nexa = {
     version: "0.7.0",
 
-    start(selector = "body") {
+    start(selector = "body", scope = {}) {
       const root =
         typeof selector === "string"
           ? document.querySelector(selector)
           : selector;
       if (root) {
-        compile(root, {});
+        compile(root, Object.assign({}, scope));
       }
     },
 
@@ -1340,6 +1582,9 @@
     evaluate,
     computed,
     watch,
+
+    registerModelModifier,
+    registerEventModifier,
 
     defineComponent,
 
