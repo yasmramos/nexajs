@@ -49,8 +49,9 @@
   //   * core assigns `window.Nexa = {...}` explicitly (nexajs.js ~line 1567);
   //   * `Nexa.start(selector = "body", scope = {})` accepts an optional second
   //     argument merged into the root scope (~line 1570);
-  //   * `Nexa.version` is set by the core ("0.7.0"); we expose
-  //     `Nexa.webviewVersion` alongside it (never overwrite core fields);
+  //   * `Nexa.version` is set by the core ("0.7.0" runtime value; note the
+  //     core header banner says v0.2.0 - see README for the version policy);
+  //     we expose Nexa.webviewVersion alongside it (never overwrite core fields);
   //   * boot guard uses our own flag `Nexa._webviewStarted` (the core does not
   //     define `_started`, so we avoid that generic name entirely).
   // =================================================================================
@@ -96,11 +97,13 @@
       }),
       fetch: typeof root.fetch === "function",
       intl: typeof root.Intl !== "undefined" && !!root.Intl.NumberFormat,
+      requestAnimationFrame: typeof root.requestAnimationFrame === "function",
       esmExecution: false // probe-verified: WebEngine does NOT run module scripts
     }
   };
   Nexa.env = env;
   Nexa.webviewVersion = "0.1.0"; // core keeps owning Nexa.version
+  env.version = Nexa.webviewVersion; // visible for diagnostics via Nexa.env
 
   // ============================================================
   // 2. POLYFILLS (install only what the probe says is missing)
@@ -157,15 +160,97 @@
   var pendingQueue = []; // calls made before injection
   var readyCallbacks = [];
   var bridgeReady = false;
-  var DEFAULT_CALL_TIMEOUT_MS = 10000;
+  var DEFAULT_CALL_TIMEOUT_MS = 5000; // desktop app: UI ops should fail fast;
+  //                                     override per call via opts.timeoutMs
 
   function nativeBridge() {
     return root.nexaNative || null;
   }
 
+  var bridge = {
+    // Plain property (not an ES5 accessor): assignment-free reads must work
+    // even in pre-ES5 engines, and this keeps the module ES5-baseline honest.
+    isReady: bridgeReady,
+
+    /** Callback API - always available; queues until Java injects the bridge. */
+    call: function (method, args, callback) {
+      var nb = nativeBridge();
+      if (!nb) {
+        pendingQueue.push({ method: method, args: args, callback: callback });
+        return null;
+      }
+      var cb = function (raw) {
+        var payload;
+        try {
+          payload = typeof raw === "string" ? JSON.parse(raw) : raw;
+        } catch (e) {
+          payload = { ok: false, error: "Malformed bridge response: " + e.message };
+        }
+        if (!callback) {
+          if (payload && payload.ok === false) {
+            console.error("[nexajs.bridge] " + method + ": " + payload.error);
+          }
+          return;
+        }
+        if (payload && payload.ok) callback(null, payload.result);
+        else {
+          var err = new Error((payload && payload.error) || "Unknown bridge error");
+          err.payload = payload; // keep full envelope (e.g. accounting error codes)
+          callback(err);
+        }
+      };
+      try {
+        nb.invoke(method, JSON.stringify(args === undefined ? {} : args), cb);
+      } catch (e) {
+        if (callback) callback(e);
+      }
+      return null;
+    },
+
+    /** Promise API - wraps the callback API. Rejects after opts.timeoutMs
+     *  (default 5s) so queued/never-answered calls cannot hang forever. */
+    invoke: function (method, args, opts) {
+      var timeoutMs = (opts && opts.timeoutMs != null) ? opts.timeoutMs : DEFAULT_CALL_TIMEOUT_MS;
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timer = null;
+        if (timeoutMs > 0) {
+          timer = setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            var err = new Error("Bridge call '" + method + "' timed out after " + timeoutMs + "ms");
+            err.code = "BRIDGE_TIMEOUT";
+            reject(err);
+          }, timeoutMs);
+        }
+        bridge.call(method, args, function (err, result) {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
+    },
+
+    onReady: function (cb) {
+      if (bridgeReady) {
+        setTimeout(cb, 0);
+      } else {
+        readyCallbacks.push(cb);
+      }
+    }
+  };
+
+  // --- activation machinery (defined AFTER `bridge` on purpose) -------------
+  // markReady() flushes pendingQueue through bridge.call(); calling it before
+  // `bridge` exists would throw a ReferenceError (TDZ). Keeping this block
+  // below the definition makes the temporal order explicit and safe against
+  // future reordering of the queue-flush path.
   function markReady() {
     if (bridgeReady) return;
     bridgeReady = true;
+    bridge.isReady = true; // plain property mirror (ES5-safe for external reads)
     // Flush queued calls in order.
     while (pendingQueue.length) {
       var item = pendingQueue.shift();
@@ -235,80 +320,6 @@
   }
   watchInjection();
 
-  var bridge = {
-    get isReady() {
-      return bridgeReady;
-    },
-
-    /** Callback API - always available; queues until Java injects the bridge. */
-    call: function (method, args, callback) {
-      var nb = nativeBridge();
-      if (!nb) {
-        pendingQueue.push({ method: method, args: args, callback: callback });
-        return null;
-      }
-      var cb = function (raw) {
-        var payload;
-        try {
-          payload = typeof raw === "string" ? JSON.parse(raw) : raw;
-        } catch (e) {
-          payload = { ok: false, error: "Malformed bridge response: " + e.message };
-        }
-        if (!callback) {
-          if (payload && payload.ok === false) {
-            console.error("[nexajs.bridge] " + method + ": " + payload.error);
-          }
-          return;
-        }
-        if (payload && payload.ok) callback(null, payload.result);
-        else {
-          var err = new Error((payload && payload.error) || "Unknown bridge error");
-          err.payload = payload; // keep full envelope (e.g. accounting error codes)
-          callback(err);
-        }
-      };
-      try {
-        nb.invoke(method, JSON.stringify(args === undefined ? {} : args), cb);
-      } catch (e) {
-        if (callback) callback(e);
-      }
-      return null;
-    },
-
-    /** Promise API - wraps the callback API. Rejects after opts.timeoutMs
-     *  (default 10s) so queued/never-answered calls cannot hang forever. */
-    invoke: function (method, args, opts) {
-      var timeoutMs = (opts && opts.timeoutMs != null) ? opts.timeoutMs : DEFAULT_CALL_TIMEOUT_MS;
-      return new Promise(function (resolve, reject) {
-        var settled = false;
-        var timer = null;
-        if (timeoutMs > 0) {
-          timer = setTimeout(function () {
-            if (settled) return;
-            settled = true;
-            var err = new Error("Bridge call '" + method + "' timed out after " + timeoutMs + "ms");
-            err.code = "BRIDGE_TIMEOUT";
-            reject(err);
-          }, timeoutMs);
-        }
-        bridge.call(method, args, function (err, result) {
-          if (settled) return;
-          settled = true;
-          if (timer) clearTimeout(timer);
-          if (err) reject(err);
-          else resolve(result);
-        });
-      });
-    },
-
-    onReady: function (cb) {
-      if (bridgeReady) {
-        setTimeout(cb, 0);
-      } else {
-        readyCallbacks.push(cb);
-      }
-    }
-  };
   Nexa.bridge = bridge;
 
   // ============================================================
@@ -397,7 +408,9 @@
     var region = m ? m[1].toUpperCase() : "";
     var map = { CU: "CUP", ES: "EUR", MX: "MXN", US: "USD", CA: "CAD", GB: "GBP",
                 DE: "EUR", FR: "EUR", IT: "EUR", PT: "EUR", BR: "BRL", JP: "JPY",
-                CN: "CNY", AU: "AUD", CO: "COP", AR: "ARS", VE: "USD" };
+                CN: "CNY", AU: "AUD", CO: "COP", AR: "ARS", VE: "VES" };
+    // NOTE: VE maps to VES (official bolivar). If your app prices in USD
+    // informally (common in Venezuela), pin it explicitly: setCurrency("USD").
     return map[region] || null;
   }
   var currencyCode = currencyForLocale(locale) || "MXN";
@@ -543,6 +556,9 @@
     return v.length < 2 ? "0" + v : v;
   }
   function applyDatePattern(d, pattern) {
+    // ⚠️ Token convention (accounting style, NOT dayjs/moment):
+    //   mm = MONTH number, MM = MINUTES. If you come from moment/dayjs,
+    //   swap them mentally or pin explicit patterns in your code review docs.
     var map = {
       yyyy: String(d.getFullYear()),
       yy: pad2(d.getFullYear() % 100),
@@ -682,6 +698,16 @@
   function hasNexaMarkup(doc) {
     var DIRECTIVES = ["x-data","x-if","x-for","x-model","x-init","x-text","x-show",
       "x-bind","x-html","x-ref","x-persist","x-component","x-effect","x-cloak","x-on"];
+    // Fast path: most directive names ARE valid CSS attribute selectors, so a
+    // single querySelector can short-circuit the scan (early exit inside the
+    // engine). Dynamic shorthands (@click, :href) are NOT valid CSS attribute
+    // names, hence the manual fallback scan below only runs when the fast
+    // path misses - worst case stays O(n·m), typical case is one cheap query.
+    var SEL = "[x-data],[x-if],[x-for],[x-model],[x-init],[x-text],[x-show]," +
+      "[x-bind],[x-html],[x-ref],[x-persist],[x-component],[x-effect],[x-cloak],[x-on]";
+    try {
+      if (doc.querySelector(SEL)) return true;
+    } catch (e) { /* exotic engine: fall through to manual scan */ }
     var nodes = doc.querySelectorAll("*");
     for (var i = 0; i < nodes.length; i++) {
       var attrs = nodes[i].attributes;
